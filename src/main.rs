@@ -12,8 +12,6 @@ const RAYS_PER_SECOND: f32 = NUM_RAYS as f32 / 2.0;
 
 const FOV: f32 = std::f32::consts::PI / 2.0;
 
-const MOUSE_SENSITIVITY: f32 = 0.101;
-
 const VIEW_DISTANCE: f32 = 7.0 * TILE_SIZE as f32;
 
 const NUM_TEXTURES: i32 = 3;
@@ -29,8 +27,6 @@ struct Player {
     direction: mq::Vec2,
     angle: f32,          // in radians
     angle_vertical: f32, // in radians
-
-    last_mouse_pos: mq::Vec2,
 }
 impl Player {
     fn new(pos: mq::Vec2) -> Self {
@@ -39,7 +35,6 @@ impl Player {
             angle: 0.0,
             angle_vertical: 0.0,
             direction: mq::Vec2::new(1.0, 0.0),
-            last_mouse_pos: mq::mouse_position().into(),
         }
     }
     fn draw(&self, scaling_info: &ScalingInfo) {
@@ -62,29 +57,22 @@ impl Player {
             mq::YELLOW,
         );
     }
-    fn touching_wall(&mut self, move_vec: mq::Vec2, delta: f32, map: &[u8]) {
-        let move_x = move_vec.x * 100.0 * delta;
-        let move_y = move_vec.y * 100.0 * delta;
+    fn touching_wall(&mut self, move_vec: mq::Vec2, map: &[u8]) {
+        let new_x = self.pos.x + TILE_SIZE as f32 * move_vec.x;
+        let new_y = self.pos.y + TILE_SIZE as f32 * move_vec.y;
 
-        self.pos.x += move_x;
-        let map_x = (self.pos.x / TILE_SIZE as f32) as usize;
-        let map_y = (self.pos.y / TILE_SIZE as f32) as usize;
+        let map_x = (new_x / TILE_SIZE as f32) as usize;
+        let map_y = (new_y / TILE_SIZE as f32) as usize;
         let map_index = map_y * MAP_WIDTH as usize + map_x;
 
-        if map[map_index] != 0 {
-            self.pos.x -= move_x;
-        }
-
-        self.pos.y += move_y;
-        let map_x = (self.pos.x / TILE_SIZE as f32) as usize;
-        let map_y = (self.pos.y / TILE_SIZE as f32) as usize;
-        let map_index = map_y * MAP_WIDTH as usize + map_x;
-
-        if map[map_index] != 0 {
-            self.pos.y -= move_y;
+        if map[map_index] == 0 {
+            // Assuming 0 is an empty tile
+            self.pos.x = new_x;
+            self.pos.y = new_y;
+            println!("pos: {:?}", self.pos);
         }
     }
-    fn input(&mut self, delta: f32, mouse_grabbed: bool, map: &[u8]) {
+    fn input(&mut self, delta: f32, map: &[u8]) {
         // Updated so you turn 90 degrees at a time
         if mq::is_key_down(mq::KeyCode::Left) {
             self.angle -= std::f32::consts::FRAC_PI_2;
@@ -92,83 +80,54 @@ impl Player {
         if mq::is_key_down(mq::KeyCode::Right) {
             self.angle += std::f32::consts::FRAC_PI_2;
         }
-        // No need to look up and down
-        // 2.1 = slightly less than 90 degrees
-        // if mq::is_key_down(mq::KeyCode::Up) {
-        //     self.angle_vertical += 3.0 * delta;
+
+        // if self.angle < 0.0 {
+        //     self.angle += 2.0 * std::f32::consts::PI;
+        // } else if self.angle > 2.0 * std::f32::consts::PI {
+        //     self.angle -= 2.0 * std::f32::consts::PI;
         // }
-        // if mq::is_key_down(mq::KeyCode::Down) {
-        //     self.angle_vertical -= 3.0 * delta;
+        // if self.angle_vertical > std::f32::consts::PI / 2.1 {
+        //     self.angle_vertical = std::f32::consts::PI / 2.1;
+        // } else if self.angle_vertical < -std::f32::consts::PI / 2.1 {
+        //     self.angle_vertical = -std::f32::consts::PI / 2.1;
         // }
-
-        let mouse_position: mq::Vec2 = mq::mouse_position().into();
-
-        // println!("mouse: {}", mouse_position);
-        let mouse_delta = mouse_position - self.last_mouse_pos;
-        self.last_mouse_pos = mouse_position;
-
-        if mouse_grabbed {
-            self.angle += mouse_delta.x * MOUSE_SENSITIVITY;
-            self.angle_vertical -= mouse_delta.y * MOUSE_SENSITIVITY;
-        }
-
-        if self.angle < 0.0 {
-            self.angle += 2.0 * std::f32::consts::PI;
-        } else if self.angle > 2.0 * std::f32::consts::PI {
-            self.angle -= 2.0 * std::f32::consts::PI;
-        }
-        if self.angle_vertical > std::f32::consts::PI / 2.1 {
-            self.angle_vertical = std::f32::consts::PI / 2.1;
-        } else if self.angle_vertical < -std::f32::consts::PI / 2.1 {
-            self.angle_vertical = -std::f32::consts::PI / 2.1;
-        }
 
         self.direction = mq::Vec2::new(self.angle.cos(), self.angle.sin());
 
         let mut move_vec = mq::Vec2::new(0.0, 0.0);
         // Updated so you move one tile at a time
-        if mq::is_key_pressed(mq::KeyCode::W) {
-            self.pos += mq::Vec2::new(
-                TILE_SIZE as f32 * self.direction.x,
-                TILE_SIZE as f32 * self.direction.y,
-            );
+
+        if mq::is_key_down(mq::KeyCode::W) {
+            move_vec = mq::Vec2::new(self.direction.x, self.direction.y);
+            println!("W");
         }
-        if mq::is_key_pressed(mq::KeyCode::S) {
-            self.pos -= mq::Vec2::new(
-                TILE_SIZE as f32 * self.direction.x,
-                TILE_SIZE as f32 * self.direction.y,
-            );
+        if mq::is_key_down(mq::KeyCode::S) {
+            move_vec = mq::Vec2::new(-self.direction.x, -self.direction.y);
         }
-        if mq::is_key_pressed(mq::KeyCode::A) {
-            self.pos += mq::Vec2::new(
-                TILE_SIZE as f32 * self.direction.y,
-                -(TILE_SIZE as f32) * self.direction.x,
-            );
+        if mq::is_key_down(mq::KeyCode::D) {
+            move_vec = mq::Vec2::new(-self.direction.y, self.direction.x);
         }
-        if mq::is_key_pressed(mq::KeyCode::D) {
-            self.pos -= mq::Vec2::new(
-                TILE_SIZE as f32 * self.direction.y,
-                -(TILE_SIZE as f32) * self.direction.x,
-            );
+        if mq::is_key_down(mq::KeyCode::A) {
+            move_vec = mq::Vec2::new(self.direction.y, -self.direction.x);
         }
 
         if move_vec.length() > 0.0 {
-            move_vec = move_vec.normalize();
-            self.touching_wall(move_vec, delta, map);
+            self.touching_wall(move_vec, map);
+        }
 
-            if self.pos.x < 0.0 {
-                self.pos.x = 0.0;
-            } else if self.pos.x > MAP_WIDTH as f32 * TILE_SIZE as f32 {
-                self.pos.x = MAP_WIDTH as f32 * TILE_SIZE as f32;
-            }
+        if self.pos.x < 0.0 {
+            self.pos.x = 0.0;
+        } else if self.pos.x > MAP_WIDTH as f32 * TILE_SIZE as f32 {
+            self.pos.x = MAP_WIDTH as f32 * TILE_SIZE as f32;
+        }
 
-            if self.pos.y < 0.0 {
-                self.pos.y = 0.0;
-            } else if self.pos.y > MAP_HEIGHT as f32 * TILE_SIZE as f32 {
-                self.pos.y = MAP_HEIGHT as f32 * TILE_SIZE as f32;
-            }
+        if self.pos.y < 0.0 {
+            self.pos.y = 0.0;
+        } else if self.pos.y > MAP_HEIGHT as f32 * TILE_SIZE as f32 {
+            self.pos.y = MAP_HEIGHT as f32 * TILE_SIZE as f32;
         }
     }
+
     fn cast_rays(
         &self,
         mut map: &mut [u8],
@@ -393,10 +352,6 @@ fn window_conf() -> mq::Conf {
         ..Default::default()
     }
 }
-fn set_grab(grab: bool) {
-    mq::set_cursor_grab(grab);
-    mq::show_mouse(!grab);
-}
 
 struct ScalingInfo {
     width: f32,
@@ -427,10 +382,6 @@ async fn main() {
         WINDOW_HEIGHT as f32 / 2.0 + TILE_SIZE as f32 / 2.0,
     ));
 
-    let mut mouse_grapped = false;
-    mq::set_cursor_grab(mouse_grapped);
-    mq::show_mouse(!mouse_grapped);
-
     #[rustfmt::skip]
     let mut map = [
         1, 0, 0, 0, 0, 0, 0, 1,
@@ -460,31 +411,9 @@ async fn main() {
 
     loop {
         let scaling_info = ScalingInfo::new();
-        let shots_fired = mq::is_mouse_button_pressed(mq::MouseButton::Left);
+        let shots_fired = mq::is_key_pressed(mq::KeyCode::Space);
         if shots_fired {
             println!("shots fired");
-        }
-
-        if mq::is_key_pressed(mq::KeyCode::Tab) || mq::is_key_down(mq::KeyCode::Escape) {
-            mouse_grapped = false;
-            set_grab(mouse_grapped);
-        } else if mq::is_mouse_button_pressed(mq::MouseButton::Left) {
-            if !mouse_grapped {
-                println!("not grabbed");
-                let (mouse_pos_x, mouse_pos_y) = mq::mouse_position();
-                if mouse_pos_x >= scaling_info.offset.x
-                    && mouse_pos_x <= scaling_info.offset.x + scaling_info.width
-                    && mouse_pos_y >= scaling_info.offset.y
-                    && mouse_pos_y <= scaling_info.offset.y + scaling_info.height
-                {
-                    mouse_grapped = true;
-                    println!("grabbed");
-                    set_grab(mouse_grapped);
-                }
-            } else {
-                mouse_grapped = false;
-                set_grab(mouse_grapped);
-            }
         }
 
         if mq::is_key_pressed(mq::KeyCode::R) {
@@ -505,14 +434,14 @@ async fn main() {
         let current_time = mq::get_time();
 
         // Check if enough time has elapsed since the last input
-        //if current_time - last_input_time >= input_threshold {
-        player.input(delta, mouse_grapped, &map);
-        //    last_input_time = current_time; // Update the last input time
-        //  }
+        if current_time - last_input_time >= input_threshold {
+            player.input(delta, &map);
+            last_input_time = current_time; // Update the last input time
+        }
         player.draw(&scaling_info);
 
         if num_rays < NUM_RAYS as f32 {
-            num_rays += delta * RAYS_PER_SECOND as f32;
+            num_rays += delta * RAYS_PER_SECOND;
         } else {
             num_rays = NUM_RAYS as f32;
         }
