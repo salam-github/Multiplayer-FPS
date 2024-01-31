@@ -85,21 +85,21 @@ impl Player {
         }
     }
     fn input(&mut self, delta: f32, mouse_grabbed: bool, map: &[u8]) {
-        // println!("grapped: {}", mouse_grabbed);
+        // Updated so you turn 90 degrees at a time
         if mq::is_key_down(mq::KeyCode::Left) {
-            self.angle -= 3.0 * delta;
+            self.angle -= std::f32::consts::FRAC_PI_2;
         }
         if mq::is_key_down(mq::KeyCode::Right) {
-            self.angle += 3.0 * delta;
+            self.angle += std::f32::consts::FRAC_PI_2;
         }
-
+        // No need to look up and down
         // 2.1 = slightly less than 90 degrees
-        if mq::is_key_down(mq::KeyCode::Up) {
-            self.angle_vertical += 3.0 * delta;
-        }
-        if mq::is_key_down(mq::KeyCode::Down) {
-            self.angle_vertical -= 3.0 * delta;
-        }
+        // if mq::is_key_down(mq::KeyCode::Up) {
+        //     self.angle_vertical += 3.0 * delta;
+        // }
+        // if mq::is_key_down(mq::KeyCode::Down) {
+        //     self.angle_vertical -= 3.0 * delta;
+        // }
 
         let mouse_position: mq::Vec2 = mq::mouse_position().into();
 
@@ -126,17 +126,30 @@ impl Player {
         self.direction = mq::Vec2::new(self.angle.cos(), self.angle.sin());
 
         let mut move_vec = mq::Vec2::new(0.0, 0.0);
-        if mq::is_key_down(mq::KeyCode::W) {
-            move_vec += self.direction;
+        // Updated so you move one tile at a time
+        if mq::is_key_pressed(mq::KeyCode::W) {
+            self.pos += mq::Vec2::new(
+                TILE_SIZE as f32 * self.direction.x,
+                TILE_SIZE as f32 * self.direction.y,
+            );
         }
-        if mq::is_key_down(mq::KeyCode::S) {
-            move_vec -= self.direction;
+        if mq::is_key_pressed(mq::KeyCode::S) {
+            self.pos -= mq::Vec2::new(
+                TILE_SIZE as f32 * self.direction.x,
+                TILE_SIZE as f32 * self.direction.y,
+            );
         }
-        if mq::is_key_down(mq::KeyCode::A) {
-            move_vec += mq::Vec2::new(self.direction.y, -self.direction.x);
+        if mq::is_key_pressed(mq::KeyCode::A) {
+            self.pos += mq::Vec2::new(
+                TILE_SIZE as f32 * self.direction.y,
+                -(TILE_SIZE as f32) * self.direction.x,
+            );
         }
-        if mq::is_key_down(mq::KeyCode::D) {
-            move_vec -= mq::Vec2::new(self.direction.y, -self.direction.x);
+        if mq::is_key_pressed(mq::KeyCode::D) {
+            self.pos -= mq::Vec2::new(
+                TILE_SIZE as f32 * self.direction.y,
+                -(TILE_SIZE as f32) * self.direction.x,
+            );
         }
 
         if move_vec.length() > 0.0 {
@@ -172,6 +185,7 @@ impl Player {
                 let ray = Ray::new(self.pos, direction);
 
                 // Pass shots_fired only if it's the center ray
+                // otherwise you destroy eveything in the cone created by rotated rays
                 let is_shots_fired = shots_fired && i == center_ray_index;
                 ray.cast_ray(&mut map, is_shots_fired)
             })
@@ -257,7 +271,7 @@ impl Ray {
                 let wall_type = map[map_index];
                 if wall_type != 0 {
                     // 0 = no wall
-                    //  if shots fired set wall to 0
+                    //  if shots fired set wall to 0 effectively removing it
                     if shots_fired {
                         map[map_index] = 0;
                     }
@@ -440,6 +454,10 @@ async fn main() {
         mq::Image::gen_image_color(WINDOW_WIDTH as u16 / 2, WINDOW_HEIGHT as u16, NORD_COLOR);
     let output_texture = mq::Texture2D::from_image(&output_image);
 
+    //used for input throttling
+    let mut last_input_time = 0.0; // Tracks the last time player.input() was called
+    let input_threshold = 0.1; // 0.1 seconds between inputs, adjust as needed
+
     loop {
         let scaling_info = ScalingInfo::new();
         let shots_fired = mq::is_mouse_button_pressed(mq::MouseButton::Left);
@@ -483,7 +501,14 @@ async fn main() {
 
         draw_map(&map, &scaling_info);
 
+        //used for input throttling
+        let current_time = mq::get_time();
+
+        // Check if enough time has elapsed since the last input
+        //if current_time - last_input_time >= input_threshold {
         player.input(delta, mouse_grapped, &map);
+        //    last_input_time = current_time; // Update the last input time
+        //  }
         player.draw(&scaling_info);
 
         if num_rays < NUM_RAYS as f32 {
