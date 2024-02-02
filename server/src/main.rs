@@ -30,32 +30,65 @@ fn window_conf() -> mq::Conf {
     }
 }
 
+struct ScalingInfo {
+    width: f32,
+    height: f32,
+    offset: mq::Vec2,
+}
+impl ScalingInfo {
+    fn new() -> ScalingInfo {
+        let w = mq::screen_width();
+        let h = mq::screen_height();
+
+        let width = w.min(h * 2.0);
+        let height = h.min(w / 2.0);
+        let offset = mq::Vec2::new((w - width) / 2.0, (h - height) / 2.0);
+
+        ScalingInfo {
+            width,
+            height,
+            offset,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 struct PlayerUpdate {
     id: String,
     action: String,
 }
-
+#[derive(Serialize, Deserialize)]
+struct GameState {
+    players: Vec<Player>,
+    map: Vec<u8>,
+}
+#[derive(Clone, Serialize, Deserialize)]
 struct Player {
     id: u8,
-    pos: mq::Vec2,
-    direction: mq::Vec2,
+    pos: (f32, f32),
+    direction: (f32, f32),
     angle: f32,          // in radians
     angle_vertical: f32, // in radians
+    rayhits: Vec<(Ray, Option<RayHit>)>,
+    last_input_time: f64,
+    action: String,
 }
 impl Player {
-    fn new(pos: mq::Vec2, id: u8) -> Self {
+    fn new(pos: (f32, f32), id: u8) -> Self {
         Self {
             id,
             pos,
+            direction: (1.0 as f32, 0.0 as f32),
             angle: 0.0,
             angle_vertical: 0.0,
-            direction: mq::Vec2::new(1.0, 0.0),
+            rayhits: Vec::new(),
+            last_input_time: 0.0,
+            action: String::from(""),
         }
     }
     fn touching_wall(&mut self, move_vec: mq::Vec2, map: &[u8]) {
-        let new_x = self.pos.x + TILE_SIZE as f32 * move_vec.x;
-        let new_y = self.pos.y + TILE_SIZE as f32 * move_vec.y;
+        let new_x = self.pos.0 + TILE_SIZE as f32 * move_vec.x;
+        let new_y = self.pos.1 + TILE_SIZE as f32 * move_vec.y;
 
         let map_x = (new_x / TILE_SIZE as f32) as usize;
         let map_y = (new_y / TILE_SIZE as f32) as usize;
@@ -63,17 +96,17 @@ impl Player {
 
         if map[map_index] == 0 {
             // Assuming 0 is an empty tile
-            self.pos.x = new_x;
-            self.pos.y = new_y;
+            self.pos.0 = new_x;
+            self.pos.1 = new_y;
             println!("pos: {:?}", self.pos);
         }
     }
-    fn input(&mut self, delta: f32, map: &[u8]) {
+    fn input(&mut self, map: &[u8]) {
         // Updated so you turn 90 degrees at a time
-        if mq::is_key_down(mq::KeyCode::Left) {
+        if self.action == "left" {
             self.angle -= std::f32::consts::FRAC_PI_2;
         }
-        if mq::is_key_down(mq::KeyCode::Right) {
+        if self.action == "right" {
             self.angle += std::f32::consts::FRAC_PI_2;
         }
 
@@ -88,48 +121,43 @@ impl Player {
         //     self.angle_vertical = -std::f32::consts::PI / 2.1;
         // }
 
-        self.direction = mq::Vec2::new(self.angle.cos(), self.angle.sin());
+        self.direction = (self.angle.cos(), self.angle.sin());
 
         let mut move_vec = mq::Vec2::new(0.0, 0.0);
         // Updated so you move one tile at a time
 
-        if mq::is_key_down(mq::KeyCode::W) {
-            move_vec = mq::Vec2::new(self.direction.x, self.direction.y);
+        if self.action == "W" {
+            move_vec = mq::Vec2::new(self.direction.0, self.direction.1);
             println!("W");
         }
-        if mq::is_key_down(mq::KeyCode::S) {
-            move_vec = mq::Vec2::new(-self.direction.x, -self.direction.y);
+        if self.action == "S" {
+            move_vec = mq::Vec2::new(-self.direction.0, -self.direction.1);
         }
-        if mq::is_key_down(mq::KeyCode::D) {
-            move_vec = mq::Vec2::new(-self.direction.y, self.direction.x);
+        if self.action == "A" {
+            move_vec = mq::Vec2::new(-self.direction.1, self.direction.0);
         }
-        if mq::is_key_down(mq::KeyCode::A) {
-            move_vec = mq::Vec2::new(self.direction.y, -self.direction.x);
+        if self.action == "D" {
+            move_vec = mq::Vec2::new(self.direction.1, -self.direction.0);
         }
 
         if move_vec.length() > 0.0 {
             self.touching_wall(move_vec, map);
         }
 
-        if self.pos.x < 0.0 {
-            self.pos.x = 0.0;
-        } else if self.pos.x > MAP_WIDTH as f32 * TILE_SIZE as f32 {
-            self.pos.x = MAP_WIDTH as f32 * TILE_SIZE as f32;
+        if self.pos.0 < 0.0 {
+            self.pos.0 = 0.0;
+        } else if self.pos.0 > MAP_WIDTH as f32 * TILE_SIZE as f32 {
+            self.pos.0 = MAP_WIDTH as f32 * TILE_SIZE as f32;
         }
 
-        if self.pos.y < 0.0 {
-            self.pos.y = 0.0;
-        } else if self.pos.y > MAP_HEIGHT as f32 * TILE_SIZE as f32 {
-            self.pos.y = MAP_HEIGHT as f32 * TILE_SIZE as f32;
+        if self.pos.1 < 0.0 {
+            self.pos.1 = 0.0;
+        } else if self.pos.1 > MAP_HEIGHT as f32 * TILE_SIZE as f32 {
+            self.pos.1 = MAP_HEIGHT as f32 * TILE_SIZE as f32;
         }
     }
 
-    fn cast_rays(
-        &self,
-        mut map: &mut [u8],
-        num_rays: u32,
-        shots_fired: bool,
-    ) -> Vec<(Ray, Option<RayHit>)> {
+    fn cast_rays(&self, mut map: &mut [u8], num_rays: u32) -> Vec<(Ray, Option<RayHit>)> {
         let rotation_matrix = mq::Mat2::from_angle(self.angle);
         let center_ray_index = num_rays / 2; // Assuming an odd number of rays
         (0..num_rays)
@@ -137,45 +165,51 @@ impl Player {
                 let unrotated_direction =
                     mq::Vec2::new(1.0, (i as f32 / num_rays as f32 - 0.5) * FOV);
                 let direction = rotation_matrix * unrotated_direction;
-                let ray = Ray::new(self.pos, direction);
+
+                let ray = Ray::new((self.pos.0, self.pos.1), (direction.x, direction.y));
 
                 // Pass shots_fired only if it's the center ray
                 // otherwise you destroy eveything in the cone created by rotated rays
-                let is_shots_fired = shots_fired && i == center_ray_index;
-                ray.cast_ray(&mut map, is_shots_fired)
+                let mut shots_fired = false;
+                if self.action == "shoot" && i == center_ray_index {
+                    println!("Shots fired");
+                    shots_fired = true;
+                }
+                ray.cast_ray(&mut map, shots_fired)
             })
             .collect()
     }
 }
 
+#[derive(Clone, Copy, Serialize, Deserialize)]
 struct RayHit {
-    pos: mq::Vec2,
+    pos: (f32, f32),
     world_distance: f32,
     x_move: bool,
     wall_coord: f32, // 0-1.0 as x
     wall_type: u8,
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 struct Ray {
-    pos: mq::Vec2,
+    pos: (f32, f32),
     angle: f32,
-    direction: mq::Vec2,
+    direction: (f32, f32),
 }
 impl Ray {
-    fn new(pos: mq::Vec2, direction: mq::Vec2) -> Self {
+    fn new(pos: (f32, f32), direction: (f32, f32)) -> Self {
         Self {
             pos,
-            angle: direction.y.atan2(direction.x),
+            angle: direction.1.atan2(direction.0),
             direction,
         }
     }
     fn cast_ray(&self, map: &mut [u8], shots_fired: bool) -> (Ray, Option<RayHit>) {
         // DDA algorithm
-        let x = self.pos.x / TILE_SIZE as f32; // (0.0, 8.0)
-        let y = self.pos.y / TILE_SIZE as f32; // (0.0, 8.0)
+        let x = self.pos.0 / TILE_SIZE as f32; // (0.0, 8.0)
+        let y = self.pos.1 / TILE_SIZE as f32; // (0.0, 8.0)
         let ray_start = mq::Vec2::new(x, y);
 
-        let ray_dir = self.direction.normalize();
+        let ray_dir = mq::Vec2::new(self.direction.0, self.direction.1).normalize();
 
         let ray_unit_step_size = mq::Vec2::new(
             (1.0 + (ray_dir.y / ray_dir.x).powi(2)).sqrt(),
@@ -231,7 +265,8 @@ impl Ray {
                         map[map_index] = 0;
                     }
 
-                    let pos = self.pos + (ray_dir * distance * TILE_SIZE as f32);
+                    let pos = mq::Vec2::new(self.pos.0, self.pos.1)
+                        + (ray_dir * distance * TILE_SIZE as f32);
 
                     let map_pos = pos / TILE_SIZE as f32;
                     let wall_pos = map_pos - map_pos.floor();
@@ -240,7 +275,7 @@ impl Ray {
                     return (
                         *self,
                         Some(RayHit {
-                            pos,
+                            pos: (pos.x, pos.y),
                             world_distance: distance * TILE_SIZE as f32,
                             x_move,
                             wall_coord,
@@ -265,8 +300,19 @@ async fn main() {
     let mut player_ids: HashMap<SocketAddr, u8> = HashMap::new();
     let mut player_count: usize = 0;
     let mut buf = [0u8; 1024];
-
     let mut players: Vec<Player> = Vec::new();
+    // let scaling_info = ScalingInfo::new();
+    let mut num_rays = 0.0;
+    let input_threshold = 0.1; // 0.1 seconds between inputs, adjust as needed
+    let mut map = [
+        1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 1, 3, 0,
+        0, 3, 3, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 3, 0, 2, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 3, 3, 3,
+        2, 1, 2, 1,
+    ];
+    let mut gamestate = GameState {
+        players: Vec::new(),
+        map: map.to_vec(),
+    };
 
     loop {
         let (len, client_addr) = socket.recv_from(&mut buf).await.unwrap();
@@ -275,97 +321,75 @@ async fn main() {
         if msg == "new_connection" {
             if !clients.contains_key(&client_addr) {
                 player_count += 1;
-                let id = format!("player{}", player_count);
+                let id = player_count.to_string();
                 println!("New player connected: {}", id);
                 socket.send_to(id.as_bytes(), client_addr).await.unwrap();
                 let new_player = Player::new(
                     mq::Vec2::new(
                         WINDOW_WIDTH as f32 / 4.0 + TILE_SIZE as f32 / 2.0,
                         WINDOW_HEIGHT as f32 / 2.0 + TILE_SIZE as f32 / 2.0,
-                    ),
+                    )
+                    .into(),
                     player_count as u8,
                 );
-                clients.insert(client_addr, new_player);
+                clients.insert(client_addr, new_player.clone());
                 // player_ids.insert(client_addr, new_player.id);
+                //add player to players
+                players.push(new_player.clone());
             }
         } else if let Ok(update) = serde_json::from_str::<PlayerUpdate>(&msg) {
             println!("Received action update from {}", client_addr);
             println!("update: {:?}", update.action);
-
-            // clients.insert(client_addr, update.action);
-
-            // Broadcast updates to all clients except the sender
-            // let all_positions: Vec<_> = clients
-            //     .iter()
-            //     .filter_map(|(&addr, pos)| {
-            //         if addr != client_addr {
-            //             Some(PlayerUpdate {
-            //                 id: player_ids[&addr].clone(),
-            //                 position: pos.clone(),
-            //             })
-            //         } else {
-            //             None
-            //         }
-            //     })
-            //     .collect();
-
-            // let broadcast_msg = serde_json::to_string(&all_positions).unwrap();
-            // for &addr in clients.keys() {
-            //     if addr != client_addr {
-            //         println!("Sending update to {}", addr);
-            //         socket
-            //             .send_to(broadcast_msg.as_bytes(), addr)
-            //             .await
-            //             .unwrap();
-            //     }
-            // }
+            // Update players action in the vector of players
+            for player in players.iter_mut() {
+                if player.id == update.id.parse::<u8>().unwrap() {
+                    player.action = update.action.clone();
+                }
+            }
         }
+
+        //for each player in the players vector, send the updated game state to all clients
+        for player in players.iter_mut() {
+            let floor_level = (WINDOW_HEIGHT as f32 / 2.0)
+                * (1.0 + player.angle_vertical.tan() / (FOV / 2.0).tan());
+            //??????
+            //    let delta = mq::get_frame_time(); // seconds
+
+            //used for input throttling
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs_f64();
+
+            // Check if enough time has elapsed since the last input
+            if current_time - player.last_input_time >= input_threshold {
+                player.input(&map);
+                player.last_input_time = current_time; // Update the last input time
+            }
+            //????
+            // if num_rays < NUM_RAYS as f32 {
+            //     num_rays += delta * RAYS_PER_SECOND;
+            // } else {
+            //     num_rays = NUM_RAYS as f32;
+            // }
+            player.rayhits = player.cast_rays(&mut map, num_rays as u32);
+        }
+
+        //update the game state
+        gamestate.players = players.clone();
+        //broadcast the game state to all clients
+        let broadcast_msg = serde_json::to_string(&gamestate).unwrap();
+        for &addr in clients.keys() {
+            println!("Sending update to {}", addr);
+            println!("broadcast_msg: {:?}", broadcast_msg);
+            socket
+                .send_to(broadcast_msg.as_bytes(), addr)
+                .await
+                .unwrap();
+
+            println!("stuck here");
+        }
+        println!("stuck here");
     }
-
-    #[rustfmt::skip]
-    let mut map = [
-        1, 0, 0, 0, 0, 0, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 2,
-        2, 0, 0, 0, 0, 0, 0, 3,
-        2, 0, 0, 1, 3, 0, 0, 3,
-        3, 0, 0, 0, 0, 0, 0, 2,
-        3, 0, 0, 3, 0, 2, 0, 1,
-        1, 0, 0, 0, 0, 0, 0, 1,
-        1, 3, 3, 3, 2, 1, 2, 1,
-    ];
-
-    let mut num_rays = 0.0;
-
-    //used for input throttling
-    let mut last_input_time = 0.0; // Tracks the last time player.input() was called
-    let input_threshold = 0.1; // 0.1 seconds between inputs, adjust as needed
-
-    // loop {
-    //     let scaling_info = ScalingInfo::new();
-    //     let shots_fired = mq::is_key_pressed(mq::KeyCode::Space);
-    //     if shots_fired {
-    //         println!("shots fired");
-    //     }
-
-    //     let floor_level =
-    //         (WINDOW_HEIGHT as f32 / 2.0) * (1.0 + player.angle_vertical.tan() / (FOV / 2.0).tan());
-
-    //     let delta = mq::get_frame_time(); // seconds
-
-    //     //used for input throttling
-    //     let current_time = mq::get_time();
-
-    //     // Check if enough time has elapsed since the last input
-    //     if current_time - last_input_time >= input_threshold {
-    //         player.input(delta, &map);
-    //         last_input_time = current_time; // Update the last input time
-    //     }
-
-    //     if num_rays < NUM_RAYS as f32 {
-    //         num_rays += delta * RAYS_PER_SECOND;
-    //     } else {
-    //         num_rays = NUM_RAYS as f32;
-    //     }
-    //     let ray_touches = player.cast_rays(&mut map, num_rays as u32, shots_fired);
-    // }
+    // #[rustfmt::skip]
 }
