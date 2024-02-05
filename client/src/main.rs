@@ -34,7 +34,7 @@ struct PlayerUpdate {
     action: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct GameState {
     players: Vec<Player>,
     map: Vec<u8>,
@@ -45,17 +45,18 @@ struct Ray {
     angle: f32,
     direction: (f32, f32),
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct Player {
     id: u8,
     pos: (f32, f32),
     direction: (f32, f32),
     angle: f32,          // in radians
     angle_vertical: f32, // in radians
-    rayhits: Vec<(Ray, Option<RayHit>)>,
+ //   rayhits: Vec<(Ray, Option<RayHit>)>,
     last_input_time: f64,
     action: String,
 }
+
 impl Player {
     fn draw(&self, scaling_info: &ScalingInfo) {
         mq::draw_circle(
@@ -76,6 +77,28 @@ impl Player {
             3.0,
             mq::YELLOW,
         );
+    }
+    fn cast_rays(&self, mut map: &mut [u8], num_rays: u32) -> Vec<(Ray, Option<RayHit>)> {
+        let rotation_matrix = mq::Mat2::from_angle(self.angle);
+        let center_ray_index = num_rays / 2; // Assuming an odd number of rays
+        (0..num_rays)
+            .map(|i| {
+                let unrotated_direction =
+                    mq::Vec2::new(1.0, (i as f32 / num_rays as f32 - 0.5) * FOV);
+                let direction = rotation_matrix * unrotated_direction;
+
+                let ray = Ray::new((self.pos.0, self.pos.1), (direction.x, direction.y));
+
+                // Pass shots_fired only if it's the center ray
+                // otherwise you destroy eveything in the cone created by rotated rays
+                let mut shots_fired = false;
+                if self.action == "shoot" && i == center_ray_index {
+                    println!("Shots fired");
+                    shots_fired = true;
+                }
+                ray.cast_ray(&mut map, shots_fired)
+            })
+            .collect()
     }
 }
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -202,6 +225,100 @@ impl ScalingInfo {
         }
     }
 }
+impl Ray {
+    fn new(pos: (f32, f32), direction: (f32, f32)) -> Self {
+        Self {
+            pos,
+            angle: direction.1.atan2(direction.0),
+            direction,
+        }
+    }
+    fn cast_ray(&self, map: &mut [u8], shots_fired: bool) -> (Ray, Option<RayHit>) {
+        // DDA algorithm
+        let x = self.pos.0 / TILE_SIZE as f32; // (0.0, 8.0)
+        let y = self.pos.1 / TILE_SIZE as f32; // (0.0, 8.0)
+        let ray_start = mq::Vec2::new(x, y);
+
+        let ray_dir = mq::Vec2::new(self.direction.0, self.direction.1).normalize();
+
+        let ray_unit_step_size = mq::Vec2::new(
+            (1.0 + (ray_dir.y / ray_dir.x).powi(2)).sqrt(),
+            (1.0 + (ray_dir.x / ray_dir.y).powi(2)).sqrt(),
+        );
+        let mut map_check = ray_start.floor();
+        let mut ray_length_1d = mq::Vec2::ZERO;
+        let mut step = mq::Vec2::ZERO;
+
+        if ray_dir.x < 0.0 {
+            step.x = -1.0;
+            ray_length_1d.x = (x - map_check.x) * ray_unit_step_size.x;
+        } else {
+            step.x = 1.0;
+            ray_length_1d.x = (map_check.x + 1.0 - x) * ray_unit_step_size.x;
+        }
+
+        if ray_dir.y < 0.0 {
+            step.y = -1.0;
+            ray_length_1d.y = (y - map_check.y) * ray_unit_step_size.y;
+        } else {
+            step.y = 1.0;
+            ray_length_1d.y = (map_check.y + 1.0 - y) * ray_unit_step_size.y;
+        }
+
+        let max_distance = 100.0;
+        let mut distance = 0.0;
+        let mut x_move;
+        while distance < max_distance {
+            if ray_length_1d.x < ray_length_1d.y {
+                map_check.x += step.x;
+                distance = ray_length_1d.x;
+                ray_length_1d.x += ray_unit_step_size.x;
+                x_move = true;
+            } else {
+                map_check.y += step.y;
+                distance = ray_length_1d.y;
+                ray_length_1d.y += ray_unit_step_size.y;
+                x_move = false;
+            }
+
+            if map_check.x >= 0.0
+                && map_check.x < MAP_WIDTH as f32
+                && map_check.y >= 0.0
+                && map_check.y < MAP_HEIGHT as f32
+            {
+                let map_index = (map_check.y * MAP_WIDTH as f32 + map_check.x) as usize;
+                let wall_type = map[map_index];
+                if wall_type != 0 {
+                    // 0 = no wall
+                    //  if shots fired set wall to 0 effectively removing it
+                    if shots_fired {
+                        map[map_index] = 0;
+                    }
+
+                    let pos = mq::Vec2::new(self.pos.0, self.pos.1)
+                        + (ray_dir * distance * TILE_SIZE as f32);
+
+                    let map_pos = pos / TILE_SIZE as f32;
+                    let wall_pos = map_pos - map_pos.floor();
+                    let wall_coord = if x_move { wall_pos.y } else { wall_pos.x };
+
+                    return (
+                        *self,
+                        Some(RayHit {
+                            pos: (pos.x, pos.y),
+                            world_distance: distance * TILE_SIZE as f32,
+                            x_move,
+                            wall_coord,
+                            wall_type,
+                        }),
+                    );
+                }
+            }
+        }
+
+        (*self, None)
+    }
+}
 
 #[macroquad::main(window_conf)]
 async fn main() {
@@ -240,16 +357,35 @@ async fn main() {
             let mut buf = [0; 1024];
             let len = socket.recv(&mut buf).await.unwrap();
             let player_id = String::from_utf8_lossy(&buf[..len]).to_string();
-            tx_id.send(player_id).unwrap();
+            tx_id.send(player_id.clone()).unwrap();
 
             // Main loop for ongoing communication
+            //bool for checking if an update was received
             loop {
+                let mut gameloopupdate = true;
                 // Check for updates from the main game loop to send to the server
-                let player_update = rx_update.recv().unwrap();
-
+                //let player_update = rx_update.recv().unwrap();
+                //use try_recv to check if there is an update from the main game loop
+                let player_update = match rx_update.try_recv() {
+                    Ok(update) => update,
+                    Err(_) => {
+                     //   If there's no update, send a ping to the server
+                       
+                        gameloopupdate = false;
+                        let player_update = PlayerUpdate {
+                            id: player_id.clone().parse().unwrap(),
+                            action: "ping".to_string(),
+                        };
+                        player_update
+                    }
+                };
+                
+               if gameloopupdate {
                 let update_msg = serde_json::to_string(&player_update).unwrap();
                 println!("Sending update to server {}", update_msg);
                 socket.send(update_msg.as_bytes()).await.unwrap();
+                }
+                
 
                 // Receive updates from the server
                 let mut buf = [0u8; 1024];
@@ -262,10 +398,13 @@ async fn main() {
                 //     }
                 match socket.recv(&mut buf).await {
                     Ok(len) => {
-                        println!("Received data from server");
+                      
                         let update: GameState =
                             serde_json::from_slice(&buf[..len]).unwrap(); // Deserialize a single GameState object
+                           // println!("Received game state: {:?}", update);
                         tx.send(vec![update]).unwrap(); // If you still need to send it as a Vec, wrap it in a Vec
+                        //flush the buffer
+                      //  buf = [0u8; 1024];
                     }
                     Err(e) => {
                         println!("Error receiving data: {:?}", e); // Log errors
@@ -280,19 +419,6 @@ async fn main() {
     println!("Assigned ID: {}", player_id);
     let player_id: u8 = player_id.parse().unwrap();
 
-    loop {
-        //listen for WASD space and arrow keys to left and right and send this data back to the spawned thread to be sent to the server
-
-        let player_update = PlayerUpdate {
-            id: player_id.clone(),
-            action: "move_forward".to_string(),
-        };
-        tx_update.send(player_update).unwrap();
-     
-
-    }
-
-    //////////////////////////////////////////////////////////
     let wall_image = mq::Image::from_file_with_format(
         include_bytes!("../resources/WolfensteinTextures.png"),
         Some(mq::ImageFormat::Png),
@@ -307,173 +433,276 @@ async fn main() {
     //used for input throttling
     let mut last_input_time = 0.0; // Tracks the last time player.input() was called
     let input_threshold = 0.1; // 0.1 seconds between inputs, adjust as needed
+    let mut initial_ping = false;
 
-    //     loop {
-    //         let scaling_info = ScalingInfo::new();
-    //         let shots_fired = mq::is_key_pressed(mq::KeyCode::Space);
-    //         if shots_fired {
-    //             println!("shots fired");
-    //         }
+    let player_update = PlayerUpdate {
+        id: player_id.clone(),
+        action: "ping".to_string(),
+    };
+    tx_update.send(player_update).unwrap();
 
-    //         if mq::is_key_pressed(mq::KeyCode::R) {
-    //             num_rays = 0.0;
-    //             output_image.get_image_data_mut().fill(NORD_COLOR.into());
-    //         }
 
-    //         let floor_level =
-    //             (WINDOW_HEIGHT as f32 / 2.0) * (1.0 + player.angle_vertical.tan() / (FOV / 2.0).tan());
+    let mut game_state = rx.recv().unwrap();
 
-    //         let delta = mq::get_frame_time(); // seconds
 
-    //         mq::clear_background(NORD_COLOR);
+        loop {
+          //  println!("Game loop");
+            //initialize player and map as empty
+     
+            listen_for_key_presses(tx_update.clone(), player_id);
 
-    //         draw_map(&map, &scaling_info);
+      
+           
+         //   println!("Listening for key presses");
+      
 
-    //         //used for input throttling
-    //         let current_time = mq::get_time();
+            match rx.try_recv() {
+                Ok(gs) => {
+                  //  println!("Received game state from server");
+                    // Initialize or update the game state here as before
+                //update the game state
+                 game_state = gs;
+                println!("Game state: {:?}", game_state);
+          
+                },
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    // No new game state available; continue with the current state
+                  //  println!("No new game state received; continuing with current state");
+                },
+                Err(e) => {
+                    // Handle other errors, such as a disconnection from the sending end
+                    println!("Error receiving game state: {:?}", e);
+                    break; // Or handle the error as appropriate for your game
+                },
+            }
+            
+           
+            let mut map = game_state[0].map.clone();
+            //match player id to the correct player
+            let player = game_state[0]
+                .players
+                .iter()
+                .find(|p| p.id == player_id)
+                .unwrap()
+                .clone();
 
-    //         // Check if enough time has elapsed since the last input
-    //         if current_time - last_input_time >= input_threshold {
-    //             player.input(delta, &map);
-    //             last_input_time = current_time; // Update the last input time
-    //         }
-    //         player.draw(&scaling_info);
+            //look for other players and place a wall type 3 where they are
+            for p in game_state[0].players.iter() {
+                if p.id != player_id {
+                    let x = p.pos.0 / TILE_SIZE as f32;
+                    let y = p.pos.1 / TILE_SIZE as f32;
+                    let map_index = (y as u32 * MAP_WIDTH + x as u32) as usize;
+                    map[map_index] = 3;
+                }
+            }
 
-    //         if num_rays < NUM_RAYS as f32 {
-    //             num_rays += delta * RAYS_PER_SECOND;
-    //         } else {
-    //             num_rays = NUM_RAYS as f32;
-    //         }
-    //         let ray_touches = player.cast_rays(&mut map, num_rays as u32, shots_fired);
+            let scaling_info = ScalingInfo::new();
 
-    //         for (i, ray_touch) in ray_touches.iter().enumerate() {
-    //             let ray = &ray_touch.0;
-    //             let ray_hit = &ray_touch.1;
+            let floor_level =
+                (WINDOW_HEIGHT as f32 / 2.0) * (1.0 + player.angle_vertical.tan() / (FOV / 2.0).tan());
 
-    //             let x = i as i32;
+            let delta = mq::get_frame_time(); // seconds
 
-    //             if let Some(ray_hit) = ray_hit {
-    //                 let angle_between = player.angle - ray.angle;
-    //                 let z = ray_hit.world_distance * angle_between.cos();
+            mq::clear_background(NORD_COLOR);
 
-    //                 let projection_dist = (TILE_SIZE as f32 / 2.0) / (FOV / 2.0).tan();
+            draw_map(&map, &scaling_info);
 
-    //                 let h = (WINDOW_HEIGHT as f32 * projection_dist) / z;
-    //                 let y0 = floor_level - (h / 2.0);
-    //                 let y1 = y0 + h;
+            //used for input throttling
+            let current_time = mq::get_time();
 
-    //                 let y0 = y0.round() as i32;
-    //                 let y1 = y1.round() as i32;
+            player.draw(&scaling_info);
 
-    //                 let texture_x = (ray_hit.wall_coord * wall_image.width() as f32).round() as i32;
-    //                 let texture_y0 =
-    //                     (wall_image.height() as i32 / NUM_TEXTURES) * (ray_hit.wall_type as i32 - 1);
-    //                 let texture_y1 = texture_y0 + wall_image.height() as i32 / NUM_TEXTURES;
+            if num_rays < NUM_RAYS as f32 {
+                num_rays += delta * RAYS_PER_SECOND;
+            } else {
+                num_rays = NUM_RAYS as f32;
+            }
+            let ray_touches = player.cast_rays(&mut map, num_rays as u32);
 
-    //                 let sky = VerticalLine::new(x, 0, y0);
-    //                 vertical_line(sky, &mut output_image, BACKGROUND_COLOR);
+            for (i, ray_touch) in ray_touches.iter().enumerate() {
+                let ray = &ray_touch.0;
+                let ray_hit = &ray_touch.1;
 
-    //                 let fog_brightness = (2.0 * ray_hit.world_distance / VIEW_DISTANCE - 1.0).max(0.0);
+                let x = i as i32;
 
-    //                 let wall_line = VerticalLine::new(x, y0, y1);
-    //                 let texture_line = VerticalLine::new(texture_x, texture_y0, texture_y1);
-    //                 vertical_textured_line_with_fog(
-    //                     wall_line,
-    //                     &mut output_image,
-    //                     &wall_image,
-    //                     texture_line,
-    //                     fog_brightness,
-    //                 );
+                if let Some(ray_hit) = ray_hit {
+                    let angle_between = player.angle - ray.angle;
+                    let z = ray_hit.world_distance * angle_between.cos();
 
-    //                 let floor = VerticalLine::new(x, y1, WINDOW_HEIGHT as i32);
-    //                 vertical_line(floor, &mut output_image, GROUND_COLOR);
+                    let projection_dist = (TILE_SIZE as f32 / 2.0) / (FOV / 2.0).tan();
 
-    //                 let color = if ray_hit.x_move {
-    //                     WALL_COLOR_LIGHT
-    //                 } else {
-    //                     WALL_COLOR_DARK
-    //                 };
-    //                 mq::draw_line(
-    //                     scaling_info.offset.x + player.pos.x * scaling_info.width / WINDOW_WIDTH as f32,
-    //                     scaling_info.offset.y
-    //                         + player.pos.y * scaling_info.height / WINDOW_HEIGHT as f32,
-    //                     scaling_info.offset.x
-    //                         + ray_hit.pos.x * scaling_info.width / WINDOW_WIDTH as f32,
-    //                     scaling_info.offset.y
-    //                         + ray_hit.pos.y * scaling_info.height / WINDOW_HEIGHT as f32,
-    //                     3.0,
-    //                     color,
-    //                 );
-    //             } else {
-    //                 let floor_y = floor_level.round() as i32;
+                    let h = (WINDOW_HEIGHT as f32 * projection_dist) / z;
+                    let y0 = floor_level - (h / 2.0);
+                    let y1 = y0 + h;
 
-    //                 let sky = VerticalLine::new(x, 0, floor_y);
-    //                 vertical_line(sky, &mut output_image, BACKGROUND_COLOR);
+                    let y0 = y0.round() as i32;
+                    let y1 = y1.round() as i32;
 
-    //                 let floor = VerticalLine::new(x, floor_y, WINDOW_HEIGHT as i32);
-    //                 vertical_line(floor, &mut output_image, GROUND_COLOR);
-    //             }
-    //         }
+                    let texture_x = (ray_hit.wall_coord * wall_image.width() as f32).round() as i32;
+                    let texture_y0 =
+                        (wall_image.height() as i32 / NUM_TEXTURES) * (ray_hit.wall_type as i32 - 1);
+                    let texture_y1 = texture_y0 + wall_image.height() as i32 / NUM_TEXTURES;
 
-    //         output_texture.update(&output_image);
-    //         mq::draw_texture_ex(
-    //             output_texture,
-    //             scaling_info.offset.x + scaling_info.width / 2.0,
-    //             scaling_info.offset.y,
-    //             mq::WHITE,
-    //             mq::DrawTextureParams {
-    //                 dest_size: Some(mq::Vec2::new(
-    //                     scaling_info.width / 2.0,
-    //                     scaling_info.height + 1.0,
-    //                 )),
-    //                 ..Default::default()
-    //             },
-    //         );
+                    let sky = VerticalLine::new(x, 0, y0);
+                    vertical_line(sky, &mut output_image, BACKGROUND_COLOR);
 
-    //         // crosshair
-    //         mq::draw_line(
-    //             scaling_info.offset.x + scaling_info.width * (3.0 / 4.0) - 10.0,
-    //             scaling_info.offset.y + scaling_info.height / 2.0,
-    //             scaling_info.offset.x + scaling_info.width * (3.0 / 4.0) + 10.0,
-    //             scaling_info.offset.y + scaling_info.height / 2.0,
-    //             2.0,
-    //             mq::BLACK,
-    //         );
-    //         mq::draw_line(
-    //             scaling_info.offset.x + scaling_info.width * (3.0 / 4.0),
-    //             scaling_info.offset.y + scaling_info.height / 2.0 - 10.0,
-    //             scaling_info.offset.x + scaling_info.width * (3.0 / 4.0),
-    //             scaling_info.offset.y + scaling_info.height / 2.0 + 10.0,
-    //             2.0,
-    //             mq::BLACK,
-    //         );
+                    let fog_brightness = (2.0 * ray_hit.world_distance / VIEW_DISTANCE - 1.0).max(0.0);
 
-    //         // text background
-    //         mq::draw_rectangle(
-    //             scaling_info.offset.x + 1.0,
-    //             scaling_info.offset.y + 1.0,
-    //             140.0,
-    //             35.0,
-    //             mq::Color::new(1.0, 1.0, 1.0, 1.0),
-    //         );
+                    let wall_line = VerticalLine::new(x, y0, y1);
+                    let texture_line = VerticalLine::new(texture_x, texture_y0, texture_y1);
+                    vertical_textured_line_with_fog(
+                        wall_line,
+                        &mut output_image,
+                        &wall_image,
+                        texture_line,
+                        fog_brightness,
+                    );
 
-    //         // text
-    //         mq::draw_text(
-    //             format!("FPS: {}", mq::get_fps()).as_str(),
-    //             scaling_info.offset.x + 5.,
-    //             scaling_info.offset.y + 15.,
-    //             20.,
-    //             mq::BLUE,
-    //         );
-    //         mq::draw_text(
-    //             format!("DELTA: {:.2} ms", delta * 1000.0).as_str(),
-    //             scaling_info.offset.x + 5.,
-    //             scaling_info.offset.y + 30.,
-    //             20.,
-    //             mq::BLUE,
-    //         );
+                    let floor = VerticalLine::new(x, y1, WINDOW_HEIGHT as i32);
+                    vertical_line(floor, &mut output_image, GROUND_COLOR);
 
-    //         mq::next_frame().await
-    //     }
-    // }
-}
+                    let color = if ray_hit.x_move {
+                        WALL_COLOR_LIGHT
+                    } else {
+                        WALL_COLOR_DARK
+                    };
+                    mq::draw_line(
+                        scaling_info.offset.x + player.pos.0 * scaling_info.width / WINDOW_WIDTH as f32,
+                        scaling_info.offset.y
+                            + player.pos.1 * scaling_info.height / WINDOW_HEIGHT as f32,
+                        scaling_info.offset.x
+                            + ray_hit.pos.0 * scaling_info.width / WINDOW_WIDTH as f32,
+                        scaling_info.offset.y
+                            + ray_hit.pos.1 * scaling_info.height / WINDOW_HEIGHT as f32,
+                        3.0,
+                        color,
+                    );
+                } else {
+                    let floor_y = floor_level.round() as i32;
+
+                    let sky = VerticalLine::new(x, 0, floor_y);
+                    vertical_line(sky, &mut output_image, BACKGROUND_COLOR);
+
+                    let floor = VerticalLine::new(x, floor_y, WINDOW_HEIGHT as i32);
+                    vertical_line(floor, &mut output_image, GROUND_COLOR);
+                }
+            }
+
+            output_texture.update(&output_image);
+            mq::draw_texture_ex(
+                output_texture,
+                scaling_info.offset.x + scaling_info.width / 2.0,
+                scaling_info.offset.y,
+                mq::WHITE,
+                mq::DrawTextureParams {
+                    dest_size: Some(mq::Vec2::new(
+                        scaling_info.width / 2.0,
+                        scaling_info.height + 1.0,
+                    )),
+                    ..Default::default()
+                },
+            );
+
+            // crosshair
+            mq::draw_line(
+                scaling_info.offset.x + scaling_info.width * (3.0 / 4.0) - 10.0,
+                scaling_info.offset.y + scaling_info.height / 2.0,
+                scaling_info.offset.x + scaling_info.width * (3.0 / 4.0) + 10.0,
+                scaling_info.offset.y + scaling_info.height / 2.0,
+                2.0,
+                mq::BLACK,
+            );
+            mq::draw_line(
+                scaling_info.offset.x + scaling_info.width * (3.0 / 4.0),
+                scaling_info.offset.y + scaling_info.height / 2.0 - 10.0,
+                scaling_info.offset.x + scaling_info.width * (3.0 / 4.0),
+                scaling_info.offset.y + scaling_info.height / 2.0 + 10.0,
+                2.0,
+                mq::BLACK,
+            );
+
+            // text background
+            mq::draw_rectangle(
+                scaling_info.offset.x + 1.0,
+                scaling_info.offset.y + 1.0,
+                140.0,
+                35.0,
+                mq::Color::new(1.0, 1.0, 1.0, 1.0),
+            );
+
+            // text
+            mq::draw_text(
+                format!("FPS: {}", mq::get_fps()).as_str(),
+                scaling_info.offset.x + 5.,
+                scaling_info.offset.y + 15.,
+                20.,
+                mq::BLUE,
+            );
+            mq::draw_text(
+                format!("DELTA: {:.2} ms", delta * 1000.0).as_str(),
+                scaling_info.offset.x + 5.,
+                scaling_info.offset.y + 30.,
+                20.,
+                mq::BLUE,
+            );
+          
+            mq::next_frame().await
+
+        }
+    }
+
+    // helper function for listening to key presses WASD left and right arrow keys and space
+    // if a key is pressed send the action to the server
+    fn listen_for_key_presses(tx_update: Sender<PlayerUpdate>, player_id: u8) {
+        if mq::is_key_pressed(mq::KeyCode::W) {
+            let player_update = PlayerUpdate {
+                id: player_id.clone(),
+                action: "W".to_string(),
+            };
+            tx_update.send(player_update).unwrap();
+        }
+        if mq::is_key_pressed(mq::KeyCode::A) {
+            let player_update = PlayerUpdate {
+                id: player_id.clone(),
+                action: "A".to_string(),
+            };
+            tx_update.send(player_update).unwrap();
+        }
+        if mq::is_key_pressed(mq::KeyCode::S) {
+            let player_update = PlayerUpdate {
+                id: player_id.clone(),
+                action: "S".to_string(),
+            };
+            tx_update.send(player_update).unwrap();
+        }
+        if mq::is_key_pressed(mq::KeyCode::D) {
+            let player_update = PlayerUpdate {
+                id: player_id.clone(),
+                action: "D".to_string(),
+            };
+            tx_update.send(player_update).unwrap();
+        }
+        if mq::is_key_pressed(mq::KeyCode::Left) {
+            let player_update = PlayerUpdate {
+                id: player_id.clone(),
+                action: "left".to_string(),
+            };
+            tx_update.send(player_update).unwrap();
+        }
+        if mq::is_key_pressed(mq::KeyCode::Right) {
+            let player_update = PlayerUpdate {
+                id: player_id.clone(),
+                action: "right".to_string(),
+            };
+            tx_update.send(player_update).unwrap();
+        }
+        if mq::is_key_pressed(mq::KeyCode::Space) {
+            let player_update = PlayerUpdate {
+                id: player_id.clone(),
+                action: "shoot".to_string(),
+            };
+            tx_update.send(player_update).unwrap();
+        }
+       
+    }
+

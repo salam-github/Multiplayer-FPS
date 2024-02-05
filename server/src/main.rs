@@ -1,7 +1,7 @@
 use macroquad::{miniquad::gl::GL_SMOOTH_POINT_SIZE_GRANULARITY, prelude as mq};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::net::UdpSocket;
 
 const WINDOW_WIDTH: u32 = 1024;
@@ -52,9 +52,9 @@ impl ScalingInfo {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 struct PlayerUpdate {
-    id: String,
+    id: u8,
     action: String,
 }
 #[derive(Serialize, Deserialize)]
@@ -69,7 +69,7 @@ struct Player {
     direction: (f32, f32),
     angle: f32,          // in radians
     angle_vertical: f32, // in radians
-    rayhits: Vec<(Ray, Option<RayHit>)>,
+    // rayhits: Vec<(Ray, Option<RayHit>)>,
     last_input_time: f64,
     action: String,
 }
@@ -81,7 +81,7 @@ impl Player {
             direction: (1.0 as f32, 0.0 as f32),
             angle: 0.0,
             angle_vertical: 0.0,
-            rayhits: Vec::new(),
+            //          rayhits: Vec::new(),
             last_input_time: 0.0,
             action: String::from(""),
         }
@@ -99,15 +99,18 @@ impl Player {
             self.pos.0 = new_x;
             self.pos.1 = new_y;
             println!("pos: {:?}", self.pos);
+            self.action = String::from("");
         }
     }
     fn input(&mut self, map: &[u8]) {
         // Updated so you turn 90 degrees at a time
         if self.action == "left" {
             self.angle -= std::f32::consts::FRAC_PI_2;
+            self.action = String::from("");
         }
         if self.action == "right" {
             self.angle += std::f32::consts::FRAC_PI_2;
+            self.action = String::from("");
         }
 
         // if self.angle < 0.0 {
@@ -133,10 +136,10 @@ impl Player {
         if self.action == "S" {
             move_vec = mq::Vec2::new(-self.direction.0, -self.direction.1);
         }
-        if self.action == "A" {
+        if self.action == "D" {
             move_vec = mq::Vec2::new(-self.direction.1, self.direction.0);
         }
-        if self.action == "D" {
+        if self.action == "A" {
             move_vec = mq::Vec2::new(self.direction.1, -self.direction.0);
         }
 
@@ -313,9 +316,21 @@ async fn main() {
         players: Vec::new(),
         map: map.to_vec(),
     };
+    // Placeholder SocketAddr
+    let placeholder_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
 
     loop {
-        let (len, client_addr) = socket.recv_from(&mut buf).await.unwrap();
+        //let (len, client_addr) = socket.recv_from(&mut buf).await.unwrap();
+        //use try_recv to read from the socket instead
+        let (len, client_addr) = match socket.try_recv_from(&mut buf) {
+            Ok((len, client_addr)) => (len, client_addr),
+            Err(_) => {
+                println!("No message received");
+                //return placeholder shit
+                //(0, /* Default or placeholder client_addr value */)
+                (0, placeholder_addr)
+            }
+        };
         let msg = String::from_utf8_lossy(&buf[..len]);
 
         if msg == "new_connection" {
@@ -338,15 +353,26 @@ async fn main() {
                 players.push(new_player.clone());
             }
         } else if let Ok(update) = serde_json::from_str::<PlayerUpdate>(&msg) {
-            println!("Received action update from {}", client_addr);
-            println!("update: {:?}", update.action);
+            // println!("Received action update from {}", client_addr);
+            // println!("update: {:?}", update.action);
+            // println!("update id: {:?}", update);
             // Update players action in the vector of players
             for player in players.iter_mut() {
-                if player.id == update.id.parse::<u8>().unwrap() {
+                println!("player id in the players struct: {:?}", player.id);
+                if player.id == update.id && update.action != "ping" {
                     player.action = update.action.clone();
+                    println!("player action updated: {:?}", player.action);
                 }
             }
         }
+
+        //add a wall type 3 to the map at the player's position
+        // for player in players.iter() {
+        //     let map_x = (player.pos.0 / TILE_SIZE as f32) as usize;
+        //     let map_y = (player.pos.1 / TILE_SIZE as f32) as usize;
+        //     let map_index = map_y * MAP_WIDTH as usize + map_x;
+        //     map[map_index] = 3;
+        // }
 
         //for each player in the players vector, send the updated game state to all clients
         for player in players.iter_mut() {
@@ -366,13 +392,6 @@ async fn main() {
                 player.input(&map);
                 player.last_input_time = current_time; // Update the last input time
             }
-            //????
-            // if num_rays < NUM_RAYS as f32 {
-            //     num_rays += delta * RAYS_PER_SECOND;
-            // } else {
-            //     num_rays = NUM_RAYS as f32;
-            // }
-            player.rayhits = player.cast_rays(&mut map, num_rays as u32);
         }
 
         //update the game state
@@ -386,10 +405,9 @@ async fn main() {
                 .send_to(broadcast_msg.as_bytes(), addr)
                 .await
                 .unwrap();
-
-            println!("stuck here");
         }
-        println!("stuck here");
+        //sleep for a bit
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
     // #[rustfmt::skip]
 }
