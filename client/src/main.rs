@@ -9,9 +9,9 @@ use tokio::runtime::Runtime;
 const WINDOW_WIDTH: u32 = 1024;
 const WINDOW_HEIGHT: u32 = 512;
 
-const MAP_WIDTH: u32 = 8;
-const MAP_HEIGHT: u32 = 8;
-const TILE_SIZE: u32 = 64;
+const MAP_WIDTH: u32 = 24;
+const MAP_HEIGHT: u32 = 24;
+const TILE_SIZE: f32 = 64.0 / 3.0;
 
 const NUM_RAYS: u32 = 512;
 const RAYS_PER_SECOND: f32 = NUM_RAYS as f32 / 2.0;
@@ -52,7 +52,6 @@ struct Player {
     direction: (f32, f32),
     angle: f32,          // in radians
     angle_vertical: f32, // in radians
- //   rayhits: Vec<(Ray, Option<RayHit>)>,
     last_input_time: f64,
     action: String,
 }
@@ -382,7 +381,7 @@ async fn main() {
                 }
                 
                 // check if there is an update from the server
-                let mut buf = [0u8; 1024];
+                let mut buf = [0u8; 10024];
                 match socket.try_recv(&mut buf) {
                     Ok(len) => {
                         let update: GameState =
@@ -453,16 +452,6 @@ async fn main() {
                 .find(|p| p.id == player_id)
                 .unwrap()
                 .clone();
-
-            //look for other players and place a wall type 3 where they are
-            for p in game_state[0].players.iter() {
-                if p.id != player_id {
-                    let x = p.pos.0 / TILE_SIZE as f32;
-                    let y = p.pos.1 / TILE_SIZE as f32;
-                    let map_index = (y as u32 * MAP_WIDTH + x as u32) as usize;
-                    map[map_index] = 3;
-                }
-            }
 
             let scaling_info = ScalingInfo::new();
             let floor_level =

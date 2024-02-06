@@ -7,9 +7,9 @@ use tokio::net::UdpSocket;
 const WINDOW_WIDTH: u32 = 1024;
 const WINDOW_HEIGHT: u32 = 512;
 
-const MAP_WIDTH: u32 = 8;
-const MAP_HEIGHT: u32 = 8;
-const TILE_SIZE: u32 = 64;
+const MAP_WIDTH: u32 = 24;
+const MAP_HEIGHT: u32 = 24;
+const TILE_SIZE: f32 = 64.0 / 3.0;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct PlayerUpdate {
@@ -50,8 +50,8 @@ impl Player {
         let map_x = (new_x / TILE_SIZE as f32) as usize;
         let map_y = (new_y / TILE_SIZE as f32) as usize;
         let map_index = map_y * MAP_WIDTH as usize + map_x;
-        //using 3 as player for now
-        if map[map_index] == 0 || map[map_index] == 3 {
+
+        if map[map_index] == 0 {
             // Assuming 0 is an empty tile
             //set the current positions tile to 0
             let current_map_x = (self.pos.0 / TILE_SIZE as f32) as usize;
@@ -60,8 +60,8 @@ impl Player {
             map[current_map_index] = 0;
             self.pos.0 = new_x;
             self.pos.1 = new_y;
-            //set the new position to 3
-            map[map_index] = 3;
+            //set the new position to 1 (player)
+            map[map_index] = 1;
             println!("pos: {:?}", self.pos);
             self.action = String::from("");
             *moved = true;
@@ -106,7 +106,7 @@ impl Player {
                 && current_y < MAP_HEIGHT as isize
             {
                 let idx = (current_y * MAP_WIDTH as isize + current_x) as usize;
-                if map[idx] == 3 {
+                if map[idx] == 1 || map[idx] == 3 {
                     // Assuming '3' is the byte value representing the wall type
                     tile_found = true;
                     //remove the wall
@@ -178,11 +178,38 @@ async fn main() {
     let mut buf = [0u8; 1024];
     let mut players: Vec<Player> = Vec::new();
     let input_threshold = 0.1; // 0.1 seconds between inputs, adjust as needed
+                               // let mut map = [
+                               //     1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 1, 3, 0,
+                               //     0, 3, 3, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 3, 0, 2, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 3, 3, 3,
+                               //     2, 1, 2, 1,
+                               // ];
+    #[rustfmt::skip]
     let mut map = [
-        1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 1, 3, 0,
-        0, 3, 3, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 3, 0, 2, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 3, 3, 3,
-        2, 1, 2, 1,
-    ];
+            2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+            2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 3, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 3, 0, 2, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 3, 3, 3, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 3, 3, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 3, 0, 3, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 3, 3, 0, 0, 3, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 3, 0, 3, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 2,
+            2, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+        ];
     let mut gamestate = GameState {
         players: Vec::new(),
         map: map.to_vec(),
@@ -250,13 +277,7 @@ async fn main() {
                 player.last_input_time = current_time; // Update the last input time
             }
         }
-        //  add a wall type 3 to the map at the player's position
-        for player in players.iter() {
-            let map_x = (player.pos.0 / TILE_SIZE as f32) as usize;
-            let map_y = (player.pos.1 / TILE_SIZE as f32) as usize;
-            let map_index = map_y * MAP_WIDTH as usize + map_x;
-            map[map_index] = 3;
-        }
+
         gamestate.map = map.to_vec();
         //if a player has moved, update the game state
         if has_a_player_moved || send_initial_gs {
@@ -267,7 +288,7 @@ async fn main() {
             let broadcast_msg = serde_json::to_string(&gamestate).unwrap();
             for &addr in clients.keys() {
                 println!("Sending update to {}", addr);
-                //  println!("broadcast_msg: {:?}", broadcast_msg);
+                println!("broadcast_msg: {:?}", broadcast_msg);
                 socket
                     .send_to(broadcast_msg.as_bytes(), addr)
                     .await
