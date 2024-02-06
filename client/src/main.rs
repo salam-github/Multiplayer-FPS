@@ -359,18 +359,13 @@ async fn main() {
             let player_id = String::from_utf8_lossy(&buf[..len]).to_string();
             tx_id.send(player_id.clone()).unwrap();
 
-            // Main loop for ongoing communication
-            //bool for checking if an update was received
+            // COMMUNICATION LOOP
             loop {
                 let mut gameloopupdate = true;
                 // Check for updates from the main game loop to send to the server
-                //let player_update = rx_update.recv().unwrap();
-                //use try_recv to check if there is an update from the main game loop
                 let player_update = match rx_update.try_recv() {
                     Ok(update) => update,
                     Err(_) => {
-                     //   If there's no update, send a ping to the server
-                       
                         gameloopupdate = false;
                         let player_update = PlayerUpdate {
                             id: player_id.clone().parse().unwrap(),
@@ -386,55 +381,39 @@ async fn main() {
                 socket.send(update_msg.as_bytes()).await.unwrap();
                 }
                 
-
-                // Receive updates from the server
+                // check if there is an update from the server
                 let mut buf = [0u8; 1024];
-                // match socket.recv(&mut buf).await {
-                //     Ok(len) => {
-                //         println!("Received data from server"); // Log when data is received
-                //         let updates: Vec<GameState> =
-                //             serde_json::from_slice(&buf[..len]).unwrap();
-                //         tx.send(updates).unwrap(); // Send updates to the game loop
-                //     }
-                match socket.recv(&mut buf).await {
+                match socket.try_recv(&mut buf) {
                     Ok(len) => {
-                      
                         let update: GameState =
-                            serde_json::from_slice(&buf[..len]).unwrap(); // Deserialize a single GameState object
-                           // println!("Received game state: {:?}", update);
-                        tx.send(vec![update]).unwrap(); // If you still need to send it as a Vec, wrap it in a Vec
-                        //flush the buffer
-                      //  buf = [0u8; 1024];
+                            serde_json::from_slice(&buf[..len]).unwrap();
+                        tx.send(vec![update]).unwrap(); 
                     }
                     Err(e) => {
-                        println!("Error receiving data: {:?}", e); // Log errors
+                      //  println!("Error receiving data: {:?}", e); // Log errors
+                      //we come here if there is no update from the server
                     }
                 }
             }
         });
     });
 
-    let player_id = rx_id.recv().unwrap(); // Receive player ID from the server
-    //cast to u8
+    let player_id = rx_id.recv().unwrap(); 
     println!("Assigned ID: {}", player_id);
     let player_id: u8 = player_id.parse().unwrap();
-
     let wall_image = mq::Image::from_file_with_format(
         include_bytes!("../resources/WolfensteinTextures.png"),
         Some(mq::ImageFormat::Png),
     );
-
     let mut num_rays = 0.0;
-
     let mut output_image =
         mq::Image::gen_image_color(WINDOW_WIDTH as u16 / 2, WINDOW_HEIGHT as u16, NORD_COLOR);
     let output_texture = mq::Texture2D::from_image(&output_image);
-
     //used for input throttling
     let mut last_input_time = 0.0; // Tracks the last time player.input() was called
     let input_threshold = 0.1; // 0.1 seconds between inputs, adjust as needed
-    let mut initial_ping = false;
 
+    let mut initial_ping = false;
     let player_update = PlayerUpdate {
         id: player_id.clone(),
         action: "ping".to_string(),
@@ -444,30 +423,20 @@ async fn main() {
 
     let mut game_state = rx.recv().unwrap();
 
-
+        // GAME LOOP
         loop {
-          //  println!("Game loop");
-            //initialize player and map as empty
-     
+            // Listen for key presses and send the action to the communication thread
             listen_for_key_presses(tx_update.clone(), player_id);
-
-      
-           
-         //   println!("Listening for key presses");
-      
-
+            // Try to receive a game state update from the communication thread
             match rx.try_recv() {
                 Ok(gs) => {
                   //  println!("Received game state from server");
-                    // Initialize or update the game state here as before
-                //update the game state
                  game_state = gs;
                 println!("Game state: {:?}", game_state);
           
                 },
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     // No new game state available; continue with the current state
-                  //  println!("No new game state received; continuing with current state");
                 },
                 Err(e) => {
                     // Handle other errors, such as a disconnection from the sending end
@@ -476,7 +445,6 @@ async fn main() {
                 },
             }
             
-           
             let mut map = game_state[0].map.clone();
             //match player id to the correct player
             let player = game_state[0]
@@ -497,19 +465,13 @@ async fn main() {
             }
 
             let scaling_info = ScalingInfo::new();
-
             let floor_level =
                 (WINDOW_HEIGHT as f32 / 2.0) * (1.0 + player.angle_vertical.tan() / (FOV / 2.0).tan());
-
             let delta = mq::get_frame_time(); // seconds
-
             mq::clear_background(NORD_COLOR);
-
             draw_map(&map, &scaling_info);
-
             //used for input throttling
             let current_time = mq::get_time();
-
             player.draw(&scaling_info);
 
             if num_rays < NUM_RAYS as f32 {
@@ -655,6 +617,7 @@ async fn main() {
     // if a key is pressed send the action to the server
     fn listen_for_key_presses(tx_update: Sender<PlayerUpdate>, player_id: u8) {
         if mq::is_key_pressed(mq::KeyCode::W) {
+            println!("W pressed");
             let player_update = PlayerUpdate {
                 id: player_id.clone(),
                 action: "W".to_string(),
