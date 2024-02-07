@@ -30,32 +30,34 @@ struct Player {
     angle_vertical: f32, // in radians
     last_input_time: f64,
     action: String,
+    name: String,
 }
 impl Player {
-    fn new(pos: (f32, f32), id: u8) -> Self {
+    fn new(pos: (f32, f32), id: u8, name: String) -> Self {
         Self {
             id,
             pos,
-            direction: (1.0 as f32, 0.0 as f32),
+            direction: (1.0_f32, 0.0_f32),
             angle: 0.0,
             angle_vertical: 0.0,
             last_input_time: 0.0,
             action: String::from(""),
+            name,
         }
     }
     fn touching_wall(&mut self, move_vec: mq::Vec2, map: &mut [u8], moved: &mut bool) {
-        let new_x = self.pos.0 + TILE_SIZE as f32 * move_vec.x;
-        let new_y = self.pos.1 + TILE_SIZE as f32 * move_vec.y;
+        let new_x = self.pos.0 + TILE_SIZE * move_vec.x;
+        let new_y = self.pos.1 + TILE_SIZE * move_vec.y;
 
-        let map_x = (new_x / TILE_SIZE as f32) as usize;
-        let map_y = (new_y / TILE_SIZE as f32) as usize;
+        let map_x = (new_x / TILE_SIZE) as usize;
+        let map_y = (new_y / TILE_SIZE) as usize;
         let map_index = map_y * MAP_WIDTH as usize + map_x;
 
         if map[map_index] == 0 {
             // Assuming 0 is an empty tile
             //set the current positions tile to 0
-            let current_map_x = (self.pos.0 / TILE_SIZE as f32) as usize;
-            let current_map_y = (self.pos.1 / TILE_SIZE as f32) as usize;
+            let current_map_x = (self.pos.0 / TILE_SIZE) as usize;
+            let current_map_y = (self.pos.1 / TILE_SIZE) as usize;
             let current_map_index = current_map_y * MAP_WIDTH as usize + current_map_x;
             map[current_map_index] = 0;
             self.pos.0 = new_x;
@@ -84,8 +86,8 @@ impl Player {
 
         if self.action == "shoot" {
             // Convert player position to grid coordinates
-            let grid_x = (self.pos.0 / TILE_SIZE as f32).floor() as usize;
-            let grid_y = (self.pos.1 / TILE_SIZE as f32).floor() as usize;
+            let grid_x = (self.pos.0 / TILE_SIZE).floor() as usize;
+            let grid_y = (self.pos.1 / TILE_SIZE).floor() as usize;
 
             // Determine direction to step through the map based on angle
             let step_x = self.angle.cos().round() as isize; // Round to ensure we move strictly in grid directions
@@ -122,10 +124,10 @@ impl Player {
 
             if tile_found {
                 // Handle the logic when a wall of type '3' is found
-                println!("Wall of type 3 found!");
+                // println!("Wall of type 3 found!");
             } else {
                 // Handle the case when no such wall is found within the map bounds
-                println!("No wall of type 3 encountered.");
+                //    println!("No wall of type 3 encountered.");
             }
 
             self.action = String::from(""); // Clear action after processing
@@ -155,14 +157,14 @@ impl Player {
 
         if self.pos.0 < 0.0 {
             self.pos.0 = 0.0;
-        } else if self.pos.0 > MAP_WIDTH as f32 * TILE_SIZE as f32 {
-            self.pos.0 = MAP_WIDTH as f32 * TILE_SIZE as f32;
+        } else if self.pos.0 > MAP_WIDTH as f32 * TILE_SIZE {
+            self.pos.0 = MAP_WIDTH as f32 * TILE_SIZE;
         }
 
         if self.pos.1 < 0.0 {
             self.pos.1 = 0.0;
-        } else if self.pos.1 > MAP_HEIGHT as f32 * TILE_SIZE as f32 {
-            self.pos.1 = MAP_HEIGHT as f32 * TILE_SIZE as f32;
+        } else if self.pos.1 > MAP_HEIGHT as f32 * TILE_SIZE {
+            self.pos.1 = MAP_HEIGHT as f32 * TILE_SIZE;
         }
     }
 }
@@ -231,34 +233,46 @@ async fn main() {
         //bool to indicate when to send initial game state, after this we only send when a player is updated
         let mut send_initial_gs = false;
 
-        if msg == "new_connection" {
-            if !clients.contains_key(&client_addr) {
+        if msg.contains("new_connection") {
+            //Retrieve name from incoming msg that is "new_connection:{player_name}"
+            let player_name = msg
+                .split_once(':')
+                .map(|(_, name)| name.trim())
+                .unwrap_or("");
+            //this condition below is a more efficient way than doing a .contains_key on a hashmap
+            if let std::collections::hash_map::Entry::Vacant(e) = clients.entry(client_addr) {
                 player_count += 1;
                 let id = player_count.to_string();
-                println!("New player connected: {}", id);
-                send_initial_gs = true;
+                println!(
+                    "New player connected with ID: {}, name: {}",
+                    id, player_name
+                );
+                if player_count == 2 {
+                    send_initial_gs = true;
+                }
                 socket.send_to(id.as_bytes(), client_addr).await.unwrap();
                 let new_player = Player::new(
                     mq::Vec2::new(
-                        WINDOW_WIDTH as f32 / 4.0 + TILE_SIZE as f32 / 2.0,
-                        WINDOW_HEIGHT as f32 / 2.0 + TILE_SIZE as f32 / 2.0,
+                        WINDOW_WIDTH as f32 / 4.0 + TILE_SIZE / 2.0,
+                        WINDOW_HEIGHT as f32 / 2.0 + TILE_SIZE / 2.0,
                     )
                     .into(),
                     player_count as u8,
+                    player_name.to_string(),
                 );
-                clients.insert(client_addr, new_player.clone());
+                e.insert(new_player.clone());
                 players.push(new_player.clone());
             }
         } else if let Ok(update) = serde_json::from_str::<PlayerUpdate>(&msg) {
-            println!("Received action update from {}", client_addr);
+            //println!("Received action update from {}", client_addr);
             // println!("update: {:?}", update.action);
             // println!("update id: {:?}", update);
             // Update players action in the vector of players
             for player in players.iter_mut() {
-                println!("player id in the players struct: {:?}", player.id);
+                //  println!("player id in the players struct: {:?}", player.id);
                 if player.id == update.id && update.action != "ping" {
                     player.action = update.action.clone();
-                    println!("player action updated: {:?}", player.action);
+                    //   println!("player action updated: {:?}", player.action);
                 }
             }
         }
@@ -281,14 +295,16 @@ async fn main() {
         gamestate.map = map.to_vec();
         //if a player has moved, update the game state
         if has_a_player_moved || send_initial_gs {
-            println!("Player has moved or new player connected, sending game state to all clients");
+            println!(
+                "Player has moved or enough players connected, sending game state to all clients"
+            );
 
             gamestate.players = players.clone();
             //broadcast the game state to all clients
             let broadcast_msg = serde_json::to_string(&gamestate).unwrap();
             for &addr in clients.keys() {
                 println!("Sending update to {}", addr);
-                println!("broadcast_msg: {:?}", broadcast_msg);
+                // println!("broadcast_msg: {:?}", broadcast_msg);
                 socket
                     .send_to(broadcast_msg.as_bytes(), addr)
                     .await
