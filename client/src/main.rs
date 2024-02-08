@@ -321,7 +321,6 @@ impl Ray {
     }
 }
 
-
 #[macroquad::main(window_conf)]
 async fn main() {
     // Get server IP address from the user

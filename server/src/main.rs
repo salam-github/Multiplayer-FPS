@@ -1,4 +1,5 @@
 use macroquad::prelude as mq;
+use rand::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -71,7 +72,7 @@ impl Player {
             *moved = true;
         }
     }
-    fn input(&mut self, map: &mut [u8], moved: &mut bool) {
+    fn input(&mut self, map: &mut [u8], moved: &mut bool) -> Option<u8> {
         // Updated so you turn 90 degrees at a time
         if self.action == "left" {
             self.angle -= std::f32::consts::FRAC_PI_2;
@@ -116,9 +117,10 @@ impl Player {
                     //remove the wall
                     map[idx] = 0;
                     self.score += 1;
+
                     //set moved to true
                     *moved = true;
-                    break; // Wall of type '3' found, stop the iteration
+                    return Some(idx as u8);
                 }
                 // Move to the next tile in the direction
                 current_x += step_x;
@@ -169,6 +171,7 @@ impl Player {
         } else if self.pos.1 > MAP_HEIGHT as f32 * TILE_SIZE {
             self.pos.1 = MAP_HEIGHT as f32 * TILE_SIZE;
         }
+        None
     }
 }
 
@@ -282,16 +285,50 @@ async fn main() {
 
         let mut has_a_player_moved = false;
 
+        // Collect IDs of players that need to be repositioned
+        let mut reposition_player_ids = Vec::new();
+
         for player in players.iter_mut() {
-            //used for input throttling
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs_f64();
-            // Check if enough time has elapsed since the last input
+
             if current_time - player.last_input_time >= input_threshold {
-                player.input(&mut map, &mut has_a_player_moved);
-                player.last_input_time = current_time; // Update the last input time
+                if let Some(idx) = &player.input(&mut map, &mut has_a_player_moved) {
+                    let x = idx % MAP_WIDTH as u8;
+                    let y = idx / MAP_WIDTH as u8;
+
+                    // Instead of another mutable borrow here, just collect the IDs
+                    reposition_player_ids.push((player.id, x, y));
+                }
+                player.last_input_time = current_time;
+            }
+        }
+
+        // Apply updates based on collected IDs, avoiding double mutable borrow
+        for (player_id, _x, _y) in reposition_player_ids {
+            let mut rng = rand::thread_rng();
+            let new_pos: (f32, f32);
+            loop {
+                let new_x_tile = rng.gen_range(0..MAP_WIDTH) as usize;
+                let new_y_tile = rng.gen_range(0..MAP_HEIGHT) as usize;
+                let idx = new_y_tile * MAP_WIDTH as usize + new_x_tile;
+                // Ensure the chosen position is empty
+                if map[idx] == 0 {
+                    // Calculate the center of the tile for the new position
+                    new_pos = (
+                        new_x_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                        new_y_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                    );
+                    break;
+                }
+            }
+
+            // Find and reposition the player including the circle on the map
+            if let Some(player) = players.iter_mut().find(|p| p.id != player_id) {
+                player.pos = new_pos;
+                has_a_player_moved = true;
             }
         }
 
