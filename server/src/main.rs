@@ -22,7 +22,7 @@ struct GameState {
     players: Vec<Player>,
     map: Vec<u8>,
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 struct Player {
     id: u8,
     pos: (f32, f32),
@@ -72,7 +72,7 @@ impl Player {
             *moved = true;
         }
     }
-    fn input(&mut self, map: &mut [u8], moved: &mut bool) -> Option<u8> {
+    fn input(&mut self, map: &mut [u8], moved: &mut bool) -> Option<u32> {
         // Updated so you turn 90 degrees at a time
         if self.action == "left" {
             self.angle -= std::f32::consts::FRAC_PI_2;
@@ -120,7 +120,7 @@ impl Player {
 
                     //set moved to true
                     *moved = true;
-                    return Some(idx as u8);
+                    return Some(idx as u32);
                 }
                 // Move to the next tile in the direction
                 current_x += step_x;
@@ -296,8 +296,8 @@ async fn main() {
 
             if current_time - player.last_input_time >= input_threshold {
                 if let Some(idx) = &player.input(&mut map, &mut has_a_player_moved) {
-                    let x = idx % MAP_WIDTH as u8;
-                    let y = idx / MAP_WIDTH as u8;
+                    let x = idx % MAP_WIDTH;
+                    let y = idx / MAP_WIDTH;
 
                     // Instead of another mutable borrow here, just collect the IDs
                     reposition_player_ids.push((player.id, x, y));
@@ -307,7 +307,7 @@ async fn main() {
         }
 
         // Apply updates based on collected IDs, avoiding double mutable borrow
-        for (player_id, _x, _y) in reposition_player_ids {
+        for (_player_id, x, y) in reposition_player_ids {
             let mut rng = rand::thread_rng();
             let new_pos: (f32, f32);
             loop {
@@ -324,9 +324,14 @@ async fn main() {
                     break;
                 }
             }
+            println!("X: {}, Y: {}", x, y);
+            println!("Players: {:?}", players);
 
             // Find and reposition the player including the circle on the map
-            if let Some(player) = players.iter_mut().find(|p| p.id != player_id) {
+            if let Some(player) = players
+                .iter_mut()
+                .find(|p| (p.pos.0 / TILE_SIZE) as u32 == x && (p.pos.1 / TILE_SIZE) as u32 == y)
+            {
                 player.pos = new_pos;
                 has_a_player_moved = true;
             }
