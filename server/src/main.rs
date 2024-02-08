@@ -31,6 +31,7 @@ struct Player {
     last_input_time: f64,
     action: String,
     name: String,
+    score: u32,
 }
 impl Player {
     fn new(pos: (f32, f32), id: u8, name: String) -> Self {
@@ -43,6 +44,7 @@ impl Player {
             last_input_time: 0.0,
             action: String::from(""),
             name,
+            score: 0,
         }
     }
     fn touching_wall(&mut self, move_vec: mq::Vec2, map: &mut [u8], moved: &mut bool) {
@@ -96,7 +98,7 @@ impl Player {
             // Initialize variables for iteration
             let mut current_x = grid_x as isize;
             let mut current_y = grid_y as isize;
-            let mut tile_found = false;
+            // let mut tile_found = false;
             //make sure we start from the tile next to the player, not from the player's tile
             current_x += step_x;
             current_y += step_y;
@@ -110,9 +112,10 @@ impl Player {
                 let idx = (current_y * MAP_WIDTH as isize + current_x) as usize;
                 if map[idx] == 1 || map[idx] == 3 {
                     // Assuming '3' is the byte value representing the wall type
-                    tile_found = true;
+                    // tile_found = true;
                     //remove the wall
                     map[idx] = 0;
+                    self.score += 1;
                     //set moved to true
                     *moved = true;
                     break; // Wall of type '3' found, stop the iteration
@@ -122,13 +125,13 @@ impl Player {
                 current_y += step_y;
             }
 
-            if tile_found {
-                // Handle the logic when a wall of type '3' is found
-                // println!("Wall of type 3 found!");
-            } else {
-                // Handle the case when no such wall is found within the map bounds
-                //    println!("No wall of type 3 encountered.");
-            }
+            // if tile_found {
+            //     // Handle the logic when a wall of type '3' is found
+            //     // println!("Wall of type 3 found!");
+            // } else {
+            //     // Handle the case when no such wall is found within the map bounds
+            //     //    println!("No wall of type 3 encountered.");
+            // }
 
             self.action = String::from(""); // Clear action after processing
         }

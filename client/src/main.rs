@@ -55,6 +55,7 @@ struct Player {
     angle_vertical: f32, // in radians
     last_input_time: f64,
     action: String,
+    score: u32,
 }
 
 impl Player {
@@ -320,6 +321,7 @@ impl Ray {
     }
 }
 
+
 #[macroquad::main(window_conf)]
 async fn main() {
     // Get server IP address from the user
@@ -335,7 +337,7 @@ async fn main() {
     let mut player_name = String::new();
     io::stdin().read_line(&mut player_name).unwrap();
     let playernamecopy = player_name.clone();
-  
+
     // Create a new Tokio runtime
     let runtime = Runtime::new().unwrap();
 
@@ -393,7 +395,7 @@ async fn main() {
 
                 if gameloopupdate {
                     let update_msg = serde_json::to_string(&player_update).unwrap();
-                   // println!("Sending update to server {}", update_msg);
+                    // println!("Sending update to server {}", update_msg);
                     socket.send(update_msg.as_bytes()).await.unwrap();
                 }
 
@@ -418,7 +420,7 @@ async fn main() {
     });
 
     let player_id = rx_id.recv().unwrap();
-   // println!("Assigned ID: {}", player_id);
+    // println!("Assigned ID: {}", player_id);
     let player_id: u8 = player_id.parse().unwrap();
     let wall_image = mq::Image::from_file_with_format(
         include_bytes!("../resources/WolfensteinTextures.png"),
@@ -440,8 +442,6 @@ async fn main() {
 
     let mut game_state = rx.recv().unwrap();
 
-    
-
     // GAME LOOP
     loop {
         // Listen for key presses and send the action to the communication thread
@@ -451,7 +451,7 @@ async fn main() {
             Ok(gs) => {
                 //  println!("Received game state from server");
                 game_state = gs;
-              //  println!("Game state: {:?}", game_state);
+                //  println!("Game state: {:?}", game_state);
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {
                 // No new game state available; continue with the current state
@@ -596,7 +596,7 @@ async fn main() {
             scaling_info.offset.x + 1.0,
             scaling_info.offset.y + 1.0,
             140.0,
-            35.0,
+            50.0,
             mq::Color::new(1.0, 1.0, 1.0, 1.0),
         );
 
@@ -612,6 +612,13 @@ async fn main() {
             format!("PLAYER: {}", playernamecopy).as_str(),
             scaling_info.offset.x + 5.,
             scaling_info.offset.y + 30.,
+            20.,
+            mq::BLUE,
+        );
+        mq::draw_text(
+            format!("Score: {}", player.score).as_str(),
+            scaling_info.offset.x + 5.,
+            scaling_info.offset.y + 45.,
             20.,
             mq::BLUE,
         );
