@@ -5,9 +5,6 @@ use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::net::UdpSocket;
 
-const WINDOW_WIDTH: u32 = 1024;
-const WINDOW_HEIGHT: u32 = 512;
-
 const MAP_WIDTH: u32 = 24;
 const MAP_HEIGHT: u32 = 24;
 const TILE_SIZE: f32 = 64.0 / 3.0;
@@ -67,7 +64,6 @@ impl Player {
             self.pos.1 = new_y;
             //set the new position to 1 (player)
             map[map_index] = 1;
-            println!("pos: {:?}", self.pos);
             self.action = String::from("");
             *moved = true;
         }
@@ -111,6 +107,11 @@ impl Player {
                 && current_y < MAP_HEIGHT as isize
             {
                 let idx = (current_y * MAP_WIDTH as isize + current_x) as usize;
+                //if idx is 2 return none and break
+                if map[idx] == 2 {
+                    break;
+                }
+
                 if map[idx] == 1 || map[idx] == 3 {
                     // Assuming '3' is the byte value representing the wall type
                     // tile_found = true;
@@ -121,19 +122,12 @@ impl Player {
                     //set moved to true
                     *moved = true;
                     return Some(idx as u32);
+                   
                 }
                 // Move to the next tile in the direction
                 current_x += step_x;
                 current_y += step_y;
             }
-
-            // if tile_found {
-            //     // Handle the logic when a wall of type '3' is found
-            //     // println!("Wall of type 3 found!");
-            // } else {
-            //     // Handle the case when no such wall is found within the map bounds
-            //     //    println!("No wall of type 3 encountered.");
-            // }
 
             self.action = String::from(""); // Clear action after processing
         }
@@ -186,11 +180,7 @@ async fn main() {
     let mut buf = [0u8; 1024];
     let mut players: Vec<Player> = Vec::new();
     let input_threshold = 0.1; // 0.1 seconds between inputs, adjust as needed
-                               // let mut map = [
-                               //     1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 0, 3, 2, 0, 0, 1, 3, 0,
-                               //     0, 3, 3, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0, 3, 0, 2, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 3, 3, 3,
-                               //     2, 1, 2, 1,
-                               // ];
+
     #[rustfmt::skip]
     let mut map = [
             2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
@@ -257,28 +247,34 @@ async fn main() {
                     send_initial_gs = true;
                 }
                 socket.send_to(id.as_bytes(), client_addr).await.unwrap();
-                let new_player = Player::new(
-                    mq::Vec2::new(
-                        WINDOW_WIDTH as f32 / 4.0 + TILE_SIZE / 2.0,
-                        WINDOW_HEIGHT as f32 / 2.0 + TILE_SIZE / 2.0,
-                    )
-                    .into(),
-                    player_count as u8,
-                    player_name.to_string(),
-                );
+                //randomize the player's position on the map and make sure it's not on a wall
+                let mut rng = rand::thread_rng();
+                let new_pos: (f32, f32);
+                loop {
+                    let new_x_tile = rng.gen_range(0..MAP_WIDTH) as usize;
+                    let new_y_tile = rng.gen_range(0..MAP_HEIGHT) as usize;
+                    let idx = new_y_tile * MAP_WIDTH as usize + new_x_tile;
+                    // Ensure the chosen position is empty
+                    if map[idx] == 0 {
+                        // Calculate the center of the tile for the new position
+                        new_pos = (
+                            new_x_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                            new_y_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                        );
+                        // Set the tile to 1 (player)
+                        map[idx] = 1;
+                        break;
+                    }
+                }
+                let new_player = Player::new(new_pos, player_count as u8, player_name.to_string());
                 e.insert(new_player.clone());
                 players.push(new_player.clone());
             }
         } else if let Ok(update) = serde_json::from_str::<PlayerUpdate>(&msg) {
-            //println!("Received action update from {}", client_addr);
-            // println!("update: {:?}", update.action);
-            // println!("update id: {:?}", update);
             // Update players action in the vector of players
             for player in players.iter_mut() {
-                //  println!("player id in the players struct: {:?}", player.id);
                 if player.id == update.id && update.action != "ping" {
                     player.action = update.action.clone();
-                    //   println!("player action updated: {:?}", player.action);
                 }
             }
         }
@@ -324,8 +320,6 @@ async fn main() {
                     break;
                 }
             }
-            println!("X: {}, Y: {}", x, y);
-            println!("Players: {:?}", players);
 
             // Find and reposition the player including the circle on the map
             if let Some(player) = players
@@ -333,6 +327,13 @@ async fn main() {
                 .find(|p| (p.pos.0 / TILE_SIZE) as u32 == x && (p.pos.1 / TILE_SIZE) as u32 == y)
             {
                 player.pos = new_pos;
+                // use the player.pos to place a tile 1 on the map
+                let new_x = player.pos.0 / TILE_SIZE;
+                let new_y = player.pos.1 / TILE_SIZE;
+                let map_x = new_x as usize;
+                let map_y = new_y as usize;
+                let map_index = map_y * MAP_WIDTH as usize + map_x;
+                map[map_index] = 1;
                 has_a_player_moved = true;
             }
         }
@@ -348,7 +349,7 @@ async fn main() {
             //broadcast the game state to all clients
             let broadcast_msg = serde_json::to_string(&gamestate).unwrap();
             for &addr in clients.keys() {
-                println!("Sending update to {}", addr);
+                // println!("Sending update to {}", addr);
                 // println!("broadcast_msg: {:?}", broadcast_msg);
                 socket
                     .send_to(broadcast_msg.as_bytes(), addr)
@@ -356,7 +357,5 @@ async fn main() {
                     .unwrap();
             }
         }
-        //sleep for a bit
-        // tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }

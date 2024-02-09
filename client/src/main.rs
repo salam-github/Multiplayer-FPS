@@ -94,7 +94,6 @@ impl Player {
                 // otherwise you destroy eveything in the cone created by rotated rays
                 let mut shots_fired = false;
                 if self.action == "shoot" && i == center_ray_index {
-                    println!("Shots fired");
                     shots_fired = true;
                 }
                 ray.cast_ray(map, shots_fired)
@@ -132,7 +131,7 @@ fn draw_map(map: &[u8], scaling_info: &ScalingInfo) {
         for x in 0..MAP_WIDTH {
             let wall = map[(y * MAP_WIDTH + x) as usize];
             let color = match wall {
-                1 => mq::BLUE,
+                1 => mq::BLACK,
                 2 => mq::RED,
                 3 => mq::GREEN,
                 _ => mq::BLACK,
@@ -450,7 +449,6 @@ async fn main() {
             Ok(gs) => {
                 //  println!("Received game state from server");
                 game_state = gs;
-                //  println!("Game state: {:?}", game_state);
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {
                 // No new game state available; continue with the current state
