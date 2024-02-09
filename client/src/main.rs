@@ -53,7 +53,6 @@ struct Player {
     direction: (f32, f32),
     angle: f32,          // in radians
     angle_vertical: f32, // in radians
-    last_input_time: f64,
     action: String,
     score: u32,
 }
@@ -81,7 +80,7 @@ impl Player {
     }
     fn cast_rays(&self, map: &mut [u8], num_rays: u32) -> Vec<(Ray, Option<RayHit>)> {
         let rotation_matrix = mq::Mat2::from_angle(self.angle);
-        let center_ray_index = num_rays / 2; // Assuming an odd number of rays
+
         (0..num_rays)
             .map(|i| {
                 let unrotated_direction =
@@ -89,14 +88,7 @@ impl Player {
                 let direction = rotation_matrix * unrotated_direction;
 
                 let ray = Ray::new((self.pos.0, self.pos.1), (direction.x, direction.y));
-
-                // Pass shots_fired only if it's the center ray
-                // otherwise you destroy eveything in the cone created by rotated rays
-                let mut shots_fired = false;
-                if self.action == "shoot" && i == center_ray_index {
-                    shots_fired = true;
-                }
-                ray.cast_ray(map, shots_fired)
+                ray.cast_ray(map)
             })
             .collect()
     }
@@ -233,7 +225,7 @@ impl Ray {
             direction,
         }
     }
-    fn cast_ray(&self, map: &mut [u8], shots_fired: bool) -> (Ray, Option<RayHit>) {
+    fn cast_ray(&self, map: &mut [u8]) -> (Ray, Option<RayHit>) {
         // DDA algorithm
         let x = self.pos.0 / TILE_SIZE; // (0.0, 8.0)
         let y = self.pos.1 / TILE_SIZE; // (0.0, 8.0)
@@ -289,12 +281,6 @@ impl Ray {
                 let map_index = (map_check.y * MAP_WIDTH as f32 + map_check.x) as usize;
                 let wall_type = map[map_index];
                 if wall_type != 0 {
-                    // 0 = no wall
-                    //  if shots fired set wall to 0 effectively removing it
-                    if shots_fired {
-                        map[map_index] = 0;
-                    }
-
                     let pos =
                         mq::Vec2::new(self.pos.0, self.pos.1) + (ray_dir * distance * TILE_SIZE);
 
@@ -428,9 +414,6 @@ async fn main() {
     let mut output_image =
         mq::Image::gen_image_color(WINDOW_WIDTH as u16 / 2, WINDOW_HEIGHT as u16, NORD_COLOR);
     let output_texture = mq::Texture2D::from_image(&output_image);
-    //used for input throttling
-    // let mut last_input_time = 0.0; // Tracks the last time player.input() was called
-    // let input_threshold = 0.1; // 0.1 seconds between inputs, adjust as needed
 
     let player_update = PlayerUpdate {
         id: player_id,
@@ -472,11 +455,9 @@ async fn main() {
         let scaling_info = ScalingInfo::new();
         let floor_level =
             (WINDOW_HEIGHT as f32 / 2.0) * (1.0 + player.angle_vertical.tan() / (FOV / 2.0).tan());
-        let delta = mq::get_frame_time(); // seconds
+        let delta = mq::get_frame_time();
         mq::clear_background(NORD_COLOR);
         draw_map(&map, &scaling_info);
-        //used for input throttling
-        // let current_time = mq::get_time();
         player.draw(&scaling_info);
 
         if num_rays < NUM_RAYS as f32 {
@@ -628,7 +609,6 @@ async fn main() {
 // if a key is pressed send the action to the server
 fn listen_for_key_presses(tx_update: Sender<PlayerUpdate>, player_id: u8) {
     if mq::is_key_pressed(mq::KeyCode::W) {
-        println!("W pressed");
         let player_update = PlayerUpdate {
             id: player_id,
             action: "W".to_string(),

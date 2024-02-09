@@ -26,7 +26,6 @@ struct Player {
     direction: (f32, f32),
     angle: f32,          // in radians
     angle_vertical: f32, // in radians
-    last_input_time: f64,
     action: String,
     name: String,
     score: u32,
@@ -39,7 +38,6 @@ impl Player {
             direction: (1.0_f32, 0.0_f32),
             angle: 0.0,
             angle_vertical: 0.0,
-            last_input_time: 0.0,
             action: String::from(""),
             name,
             score: 0,
@@ -121,8 +119,9 @@ impl Player {
 
                     //set moved to true
                     *moved = true;
+                    //reset action
+                    self.action = String::from("");
                     return Some(idx as u32);
-                   
                 }
                 // Move to the next tile in the direction
                 current_x += step_x;
@@ -179,7 +178,6 @@ async fn main() {
     let mut player_count: usize = 0;
     let mut buf = [0u8; 1024];
     let mut players: Vec<Player> = Vec::new();
-    let input_threshold = 0.1; // 0.1 seconds between inputs, adjust as needed
 
     #[rustfmt::skip]
     let mut map = [
@@ -285,20 +283,12 @@ async fn main() {
         let mut reposition_player_ids = Vec::new();
 
         for player in players.iter_mut() {
-            let current_time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs_f64();
+            if let Some(idx) = &player.input(&mut map, &mut has_a_player_moved) {
+                let x = idx % MAP_WIDTH;
+                let y = idx / MAP_WIDTH;
 
-            if current_time - player.last_input_time >= input_threshold {
-                if let Some(idx) = &player.input(&mut map, &mut has_a_player_moved) {
-                    let x = idx % MAP_WIDTH;
-                    let y = idx / MAP_WIDTH;
-
-                    // Instead of another mutable borrow here, just collect the IDs
-                    reposition_player_ids.push((player.id, x, y));
-                }
-                player.last_input_time = current_time;
+                // Instead of another mutable borrow here, just collect the IDs
+                reposition_player_ids.push((player.id, x, y));
             }
         }
 
@@ -341,9 +331,9 @@ async fn main() {
         gamestate.map = map.to_vec();
         //if a player has moved, update the game state
         if has_a_player_moved || send_initial_gs {
-            println!(
-                "Player has moved or enough players connected, sending game state to all clients"
-            );
+            // println!(
+            //     "Player has moved or enough players connected, sending game state to all clients"
+            // );
 
             gamestate.players = players.clone();
             //broadcast the game state to all clients
