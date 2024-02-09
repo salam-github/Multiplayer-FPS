@@ -113,9 +113,11 @@ impl Player {
                 if map[idx] == 1 || map[idx] == 3 {
                     // Assuming '3' is the byte value representing the wall type
                     // tile_found = true;
+                    if map[idx] == 1 {
+                        self.score += 1;
+                    }
                     //remove the wall
                     map[idx] = 0;
-                    self.score += 1;
 
                     //set moved to true
                     *moved = true;
