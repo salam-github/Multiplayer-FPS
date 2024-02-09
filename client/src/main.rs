@@ -39,6 +39,8 @@ struct PlayerUpdate {
 struct GameState {
     players: Vec<Player>,
     map: Vec<u8>,
+    new_round_state: bool,
+    winner: String,
 }
 #[derive(Clone, Copy, Serialize, Deserialize)]
 struct Ray {
@@ -601,6 +603,23 @@ async fn main() {
             mq::BLUE,
         );
 
+        //if gamestate.new_round_state == true draw big ass text "VI BÖRJÄR NYA ROUND MOTHERFUCKERS" in the middle of the screen
+        if game_state[0].new_round_state {
+            mq::draw_text(
+                format!("WINNER IS {}", game_state[0].winner).as_str(),
+                scaling_info.offset.x + 300.,
+                scaling_info.offset.y + 250.,
+                50.,
+                mq::BLUE,
+            );
+            mq::draw_text(
+                "VI BÖRJÄR NYA ROUND MOTHERFUCKERS",
+                scaling_info.offset.x + 300.,
+                scaling_info.offset.y + 300.,
+                50.,
+                mq::BLUE,
+            );
+        }
         mq::next_frame().await
     }
 }

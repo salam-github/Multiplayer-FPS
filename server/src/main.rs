@@ -20,6 +20,8 @@ struct PlayerUpdate {
 struct GameState {
     players: Vec<Player>,
     map: Vec<u8>,
+    new_round_state: bool,
+    winner: String,
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct Player {
@@ -183,11 +185,13 @@ async fn main() {
     let mut buf = [0u8; 1024];
     let mut players: Vec<Player> = Vec::new();
 
-    #[rustfmt::skip]
     let mut map = select_map(1);
+    let mut round: u8 = 1;
     let mut gamestate = GameState {
         players: Vec::new(),
         map: map.to_vec(),
+        new_round_state: false,
+        winner: String::from(""),
     };
 
     let placeholder_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
@@ -306,6 +310,29 @@ async fn main() {
                 has_a_player_moved = true;
             }
         }
+        let mut new_round = false;
+        //if one of the players has reached the score limit (5), start a new round
+        for player in players.iter() {
+            if player.score >= 5 {
+                new_round = true;
+                round += 1;
+                gamestate.winner = player.name.clone();
+            }
+        }
+        //if new round select new map and reset player scores and randomly place them on the map
+        if new_round {
+            if round == 4 {
+                round = 1;
+            }
+            let new_map = select_map(round);
+            map = new_map;
+            gamestate.map = map.to_vec();
+            for player in players.iter_mut() {
+                player.score = 0;
+                gamestate.new_round_state = true;
+            }
+            randomize_player_position(&mut map, &mut players);
+        }
 
         gamestate.map = map.to_vec();
         //if a player has moved, update the game state
@@ -318,13 +345,51 @@ async fn main() {
             //broadcast the game state to all clients
             let broadcast_msg = serde_json::to_string(&gamestate).unwrap();
             for &addr in clients.keys() {
-                // println!("Sending update to {}", addr);
+                //  println!("Sending update to {}", addr);
                 // println!("broadcast_msg: {:?}", broadcast_msg);
                 socket
                     .send_to(broadcast_msg.as_bytes(), addr)
                     .await
                     .unwrap();
+                //if new round wait 5s before sending the game state again
+            }
+            if new_round {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            }
+            //reset new_round
+
+            gamestate.new_round_state = false;
+            gamestate.winner = String::from("");
+        }
+    }
+}
+
+//helper function to randomly place players on the map
+fn randomize_player_position(map: &mut [u8], players: &mut [Player]) {
+    let mut rng = rand::thread_rng();
+    for player in players.iter_mut() {
+        let new_pos: (f32, f32);
+        loop {
+            let new_x_tile = rng.gen_range(0..MAP_WIDTH) as usize;
+            let new_y_tile = rng.gen_range(0..MAP_HEIGHT) as usize;
+            let idx = new_y_tile * MAP_WIDTH as usize + new_x_tile;
+            // Ensure the chosen position is empty
+            if map[idx] == 0 {
+                // Calculate the center of the tile for the new position
+                new_pos = (
+                    new_x_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                    new_y_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                );
+                break;
             }
         }
+        player.pos = new_pos;
+        // use the player.pos to place a tile 1 on the map
+        let new_x = player.pos.0 / TILE_SIZE;
+        let new_y = player.pos.1 / TILE_SIZE;
+        let map_x = new_x as usize;
+        let map_y = new_y as usize;
+        let map_index = map_y * MAP_WIDTH as usize + map_x;
+        map[map_index] = 1;
     }
 }
