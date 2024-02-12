@@ -6,6 +6,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
+mod menu; 
+use crate::menu::show_menu;
+mod shared;
+use shared::{AppState, AppStateData, GameSessionInfo, Server};
+
 
 const WINDOW_WIDTH: u32 = 1024;
 const WINDOW_HEIGHT: u32 = 512;
@@ -308,39 +313,33 @@ impl Ray {
     }
 }
 
+
 #[macroquad::main(window_conf)]
 async fn main() {
-    // Get server IP address from the user
-    print!("Enter IP:PORT of the server you wish to connect to: ");
-    io::stdout().flush().unwrap();
-    let mut server_addr = String::new();
-    io::stdin().read_line(&mut server_addr).unwrap();
-    let server_addr = server_addr.trim(); // Remove newline character
+    // Show the menu and wait for it to return session info
+    if let Some(session_info) = menu::show_menu().await {
+        // Use the session info to start the game
+        println!("Starting game with session info: {:?}", session_info);
+        start_game(session_info).await;
+    } else {
+        println!("Session info not provided, cannot start the game.");
+    }
+}
 
-    // Get player name
-    print!("Enter Name: ");
-    io::stdout().flush().unwrap();
-    let mut player_name = String::new();
-    io::stdin().read_line(&mut player_name).unwrap();
-    let playernamecopy = player_name.clone();
+async fn start_game(game_session_info: GameSessionInfo) {
+    let runtime = Runtime::new().expect("Failed to create runtime");
 
-    // Create a new Tokio runtime
-    let runtime = Runtime::new().unwrap();
-
-    // Create the socket and connect it to the server
     let socket = runtime.block_on(async {
-        let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-        socket.connect(server_addr).await.unwrap();
-        println!("Connected to server at {}", server_addr);
-        println!("Waiting for all the players to join...");
+        let socket = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind socket");
+        socket.connect(&game_session_info.server_address).await.expect("Failed to connect to server");
+        println!("Connected to server at {}", game_session_info.server_address);
         socket
     });
 
-    // Wrap the socket in Arc<Mutex<>> for sharing across threads
     let shared_socket = Arc::new(Mutex::new(socket));
-
-    // Setup networking in a separate thread
-    let (tx, rx): (Sender<Vec<GameState>>, Receiver<Vec<GameState>>) = mpsc::channel();
+    
+    // Corrected channel creation without specifying capacity
+    let (tx, rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
     let (tx_id, rx_id): (Sender<String>, Receiver<String>) = mpsc::channel();
     let (tx_update, rx_update): (Sender<PlayerUpdate>, Receiver<PlayerUpdate>) = mpsc::channel();
 
