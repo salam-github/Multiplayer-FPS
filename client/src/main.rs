@@ -337,6 +337,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
     });
 
     let shared_socket = Arc::new(Mutex::new(socket));
+    let player_name = game_session_info.player_name.clone();
     
     // Corrected channel creation without specifying capacity
     let (tx, rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
@@ -347,7 +348,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
 
     thread::spawn(move || {
         runtime.block_on(async {
-            let socket = socket_clone.lock().unwrap();
+            let socket_lock = socket_clone.lock().expect("Failed to lock the socket for usage");
 
             //format a string "new_connection:{player_name}"
             let initial_msg = format!("new_connection:{}", player_name.clone().trim());
