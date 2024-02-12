@@ -338,6 +338,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
 
     let shared_socket = Arc::new(Mutex::new(socket));
     let player_name = game_session_info.player_name.clone();
+    let playernamecopy = game_session_info.player_name.clone();
     
     // Corrected channel creation without specifying capacity
     let (tx, rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
