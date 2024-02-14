@@ -224,7 +224,7 @@ async fn main() {
                     "New player connected with ID: {}, name: {}",
                     id, player_name
                 );
-                if player_count == 2 {
+                if player_count == 1 { //change this to 1 for now so the menu starts up the client when user first boots up the server
                     send_initial_gs = true;
                 }
                 socket.send_to(id.as_bytes(), client_addr).await.unwrap();

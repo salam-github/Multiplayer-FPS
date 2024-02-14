@@ -1,10 +1,9 @@
-use macroquad::prelude::*;
-use std::process::Command;
-use macroquad::ui::{hash, root_ui, widgets, Skin};
-use serde::{Serialize, Deserialize};
-use uuid::Uuid;
 use crate::shared::{AppState, AppStateData, GameSessionInfo, Server};
-
+use macroquad::prelude::*;
+use macroquad::ui::{hash, root_ui, widgets, Skin};
+use serde::{Deserialize, Serialize};
+use std::process::Command;
+use uuid::Uuid;
 
 fn render_back_button(
     ui: &mut macroquad::ui::Ui,
@@ -24,8 +23,7 @@ fn render_back_button(
 const PLAYER_COUNT: i32 = 10;
 
 // #[macroquad::main("Haze wars")]
-pub async fn show_menu() -> Option<GameSessionInfo>{
-
+pub async fn show_menu() -> Option<GameSessionInfo> {
     let mut session_info: Option<GameSessionInfo> = None;
 
     let mut app_state = AppStateData {
@@ -33,6 +31,7 @@ pub async fn show_menu() -> Option<GameSessionInfo>{
         servers: Vec::new(),
         selected_server: None,
         player_name: String::new(),
+        input_ip: String::new(),
         // is_fullscreen: false,
     };
     let skin = {
@@ -133,6 +132,7 @@ pub async fn show_menu() -> Option<GameSessionInfo>{
     let mut player_name = String::new();
     let mut server_name = String::new();
     let mut is_fullscreen = false;
+    let mut input_ip = String::new();
 
     loop {
         clear_background(BLACK);
@@ -183,7 +183,7 @@ pub async fn show_menu() -> Option<GameSessionInfo>{
                     .position(vec2(button_x, screen_center.y - 60.0))
                     .ui(&mut *root_ui())
                 {
-                    current_state = AppState::BrowseServers;
+                    current_state = AppState::ConnectToServer;
                 }
                 if widgets::Button::new("Create Server")
                     .size(vec2(600.0, 50.0))
@@ -198,47 +198,66 @@ pub async fn show_menu() -> Option<GameSessionInfo>{
                     .ui(&mut *root_ui())
                 {
                     current_state = AppState::OptionsHelpMenu;
-                }
+                } //remove debug info button before release
                 if widgets::Button::new("Debug Info")
-                .size(vec2(600.0, 50.0))
-                .position(vec2(button_x, screen_height() - 120.0))
-                .ui(&mut *root_ui())
-            {
-                let session_info = app_state.gather_session_info();
-                // Use the to_debug_string method to get a formatted string
-                println!("Debug Info: \n{}", session_info.to_debug_string());
-            }
-
-            }
-
-            AppState::BrowseServers => {
-                let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
-                let button_width = 600.0;
-                let button_x = screen_center.x - (button_width / 2.0);
-                // List servers from the servers list
-                let servers = app_state.servers.iter(); // Using the actual servers list from app_state
-                let mut button_y = screen_center.y - (servers.len() as f32 * 60.0) / 2.0; // Starting Y position for servers list
-
-                for server in servers {
-                    if widgets::Button::new(format!(
-                        "{} - Players: {}",
-                        server.name, server.player_count
-                    ))
-                    .size(vec2(button_width, 50.0)) // Specify button size
-                    .position(vec2(button_x, button_y)) // Use button_x and button_y for positioning
+                    .size(vec2(600.0, 50.0))
+                    .position(vec2(button_x, screen_height() - 120.0))
                     .ui(&mut *root_ui())
-                    {
-                        println!(
-                            "Server Selected: {} with {} players",
-                            server.name, server.player_count
-                        );
-                        app_state.selected_server = Some(server.clone());
-                        current_state = AppState::Lobby; // Transition to the Lobby state
-                    }
-                    button_y += 60.0; // Increment Y position for the next button
+                {
+                    let session_info = app_state.gather_session_info();
+                    println!("Debug Info: \n{}", session_info.to_debug_string());
                 }
-                render_back_button(&mut *root_ui(), &mut current_state, AppState::MainMenu);
             }
+
+            AppState::ConnectToServer => {
+                let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
+                let container_size = vec2(400.0, 200.0);
+                let container_pos = vec2(
+                    screen_center.x - container_size.x * 0.5,
+                    screen_center.y - container_size.y * 0.5,
+                );
+            
+                // Input field for server IP
+                root_ui().window(hash!(), container_pos, container_size, |ui| {
+                    let input_label = "Enter IP Address";
+                    ui.label(None, input_label);
+                    ui.input_text(hash!(input_label), "", &mut input_ip);
+
+                    if ui.button(None, "Join") {
+                        let trimmed_ip = input_ip.trim();
+                        if !trimmed_ip.is_empty() {
+                            // Update the input_id in AppStateData
+                            println!("Attempting to connect to server: {}", trimmed_ip);
+                            app_state.selected_server = Some(Server {
+                                id: Uuid::new_v4().to_string(),
+                                name: input_ip.clone(),
+                                player_count: PLAYER_COUNT,
+                            });
+                            current_state = AppState::Lobby;
+                        }
+                    }
+                });
+            
+                // Optionally display recent connections if needed
+                // Example: Displaying below the input field, adjust positions as necessary
+                // for (index, server) in app_state.servers.iter().enumerate() {
+                //     if widgets::Button::new(&*server.name)
+                //         .size(vec2(300.0, 30.0))
+                //         .position(vec2(
+                //             screen_center.x - 150.0,
+                //             100.0 + index as f32 * 35.0, // Start below the input field
+                //         ))
+                //         .ui(&mut *root_ui())
+                //     {
+                //         println!("Selected recent connection: {}", server.name);
+                //         app_state.selected_server = Some(server.clone());
+                //         // You could directly attempt to connect here or just set the selected_server
+                //     }
+                // }
+            
+                render_back_button(&mut *root_ui(), &mut app_state.current_state, AppState::MainMenu);
+            }
+            
 
             AppState::CreateServer => {
                 let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
@@ -261,7 +280,7 @@ pub async fn show_menu() -> Option<GameSessionInfo>{
                                 id: server_id.to_string(),
                                 name: server_name.trim().to_string(),
                                 player_count: PLAYER_COUNT,
-                                // address: "".to_string(), 
+                                // address: "".to_string(),
                             };
                             println!("Server Created: {} ID: {}", server_name, server_id);
                             app_state.servers.push(new_server.clone());
@@ -291,7 +310,7 @@ pub async fn show_menu() -> Option<GameSessionInfo>{
                                     "{} Joining game on server: {} with {} players",
                                     app_state.player_name, server.name, PLAYER_COUNT
                                 );
-                                
+
                                 // Assuming you have a function to serialize and send or start the backend process
                                 let session_info = GameSessionInfo {
                                     player_name: app_state.player_name.clone(),
@@ -299,9 +318,10 @@ pub async fn show_menu() -> Option<GameSessionInfo>{
                                     joined_server: Some(server.clone()),
                                     server_address: server.name.clone(),
                                 };
-                                
+
                                 // run_backend_process(&session_info);
-                                let serialized_data = serde_json::to_string(&session_info).expect("Failed to serialize");
+                                let serialized_data = serde_json::to_string(&session_info)
+                                    .expect("Failed to serialize");
                                 println!("Serialized session info: {}", serialized_data);
 
                                 // Transition to the game state or perform other setup as necessary
@@ -312,7 +332,7 @@ pub async fn show_menu() -> Option<GameSessionInfo>{
                     );
                 } else {
                     println!("Error: No server selected");
-                    app_state.current_state = AppState::BrowseServers;
+                    app_state.current_state = AppState::ConnectToServer;
                 }
                 render_back_button(&mut *root_ui(), &mut current_state, AppState::MainMenu);
             }
@@ -340,12 +360,12 @@ pub async fn show_menu() -> Option<GameSessionInfo>{
                 );
                 render_back_button(&mut *root_ui(), &mut current_state, AppState::MainMenu);
             } // Add additional states if necessary
-        AppState::Game => {
-            println!("Transitioning to game...");
-            // Prepare the session_info based on user choices in the menu
-            session_info = Some(app_state.gather_session_info());
-            break; // Break out of the loop to return session_info
-        }
+            AppState::Game => {
+                println!("Transitioning to game...");
+                // Prepare the session_info based on user choices in the menu
+                session_info = Some(app_state.gather_session_info());
+                break; // Break out of the loop to return session_info
+            }
         }
         root_ui().pop_skin();
 
@@ -354,8 +374,6 @@ pub async fn show_menu() -> Option<GameSessionInfo>{
     session_info
 }
 
-
-
 impl AppStateData {
     // Method to gather session info for use in other parts of the game
     fn gather_session_info(&self) -> GameSessionInfo {
@@ -363,7 +381,9 @@ impl AppStateData {
             player_name: self.player_name.clone(),
             created_servers: self.servers.clone(),
             joined_server: self.selected_server.clone(),
-            server_address: self.selected_server.as_ref()
+            server_address: self
+                .selected_server
+                .as_ref()
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| "".into()),
         }
@@ -372,11 +392,15 @@ impl AppStateData {
 impl GameSessionInfo {
     // Method to format the information into a string
     fn to_debug_string(&self) -> String {
-        let servers = self.created_servers.iter()
+        let servers = self
+            .created_servers
+            .iter()
             .map(|s| format!("{} (ID: {}, Players: {})", s.name, s.id, s.player_count))
             .collect::<Vec<_>>()
             .join(", ");
-        let selected_server = self.joined_server.as_ref()
+        let selected_server = self
+            .joined_server
+            .as_ref()
             .map(|s| s.name.clone())
             .unwrap_or_else(|| "None".into());
 

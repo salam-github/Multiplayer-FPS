@@ -6,11 +6,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
-mod menu; 
+mod menu;
 use crate::menu::show_menu;
 mod shared;
 use shared::{AppState, AppStateData, GameSessionInfo, Server};
-
 
 const WINDOW_WIDTH: u32 = 1024;
 const WINDOW_HEIGHT: u32 = 512;
@@ -313,7 +312,6 @@ impl Ray {
     }
 }
 
-
 #[macroquad::main(window_conf)]
 async fn main() {
     // Show the menu and wait for it to return session info
@@ -326,21 +324,27 @@ async fn main() {
     }
 }
 
-
-
 async fn start_game(game_session_info: GameSessionInfo) {
     let runtime = Runtime::new().expect("Failed to create runtime");
 
     let socket = runtime.block_on(async {
-        let socket = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind socket");
-        socket.connect(&game_session_info.server_address).await.expect("Failed to connect to server");
-        println!("Connected to server at {}", game_session_info.server_address);
+        let socket = UdpSocket::bind("0.0.0.0:0")
+            .await
+            .expect("Failed to bind socket");
+        socket
+            .connect(&game_session_info.server_address)
+            .await
+            .expect("Failed to connect to server");
+        println!(
+            "Connected to server at {}",
+            game_session_info.server_address
+        );
         print!("waiting for all players to connect...");
         socket
     });
     let player_name = game_session_info.player_name.clone();
     let playernamecopy = game_session_info.player_name.clone();
-    
+
     // Wrap the socket in Arc<Mutex<>> for sharing across threads
     let shared_socket = Arc::new(Mutex::new(socket));
     // let (tx, rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
@@ -394,7 +398,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
                 match socket.try_recv(&mut buf) {
                     Ok(len) => {
                         let update: GameState = serde_json::from_slice(&buf[..len]).unwrap();
-                        tx.send(update).unwrap();  // If tx expects GameState
+                        tx.send(update).unwrap(); // If tx expects GameState
                         if !game_begun {
                             println!("Game has begun!");
                             game_begun = true;
@@ -449,7 +453,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
             }
         }
 
-       let mut map = game_state.map.clone();
+        let mut map = game_state.map.clone();
         //match player id to the correct player
         let player = game_state
             .players
