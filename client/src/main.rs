@@ -372,6 +372,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
             tx_id.send(player_id.clone()).unwrap();
             let mut game_begun = false;
 
+
             // COMMUNICATION LOOP
             loop {
                 let mut gameloopupdate = true;
