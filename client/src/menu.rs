@@ -16,9 +16,13 @@ fn render_back_button(
         .position(vec2(screen_center.x - 100.0, screen_height() - 80.0))
         .ui(ui)
     {
+        println!("Back button clicked, transitioning to MainMenu");
         *current_state = target_state;
     }
 }
+
+
+
 
 const PLAYER_COUNT: i32 = 10;
 
@@ -223,7 +227,7 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                     ui.label(None, input_label);
                     ui.input_text(hash!(input_label), "", &mut input_ip);
 
-                    if ui.button(None, "Join") {
+                    if ui.button(None, "Confirm") {
                         let trimmed_ip = input_ip.trim();
                         if !trimmed_ip.is_empty() {
                             // Update the input_id in AppStateData
@@ -255,24 +259,25 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                 //     }
                 // }
             
-                render_back_button(&mut *root_ui(), &mut app_state.current_state, AppState::MainMenu);
+                render_back_button(&mut *root_ui(), &mut current_state, AppState::MainMenu);
             }
             
 
             AppState::CreateServer => {
                 let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
-                let container_size = vec2(400.0, 200.0);
+                let container_size = vec2(500.0, 300.0);
                 let container_pos = vec2(
                     screen_center.x - container_size.x * 0.5,
                     screen_center.y - container_size.y * 0.5,
                 );
+
 
                 root_ui().window(hash!(), container_pos, container_size, |ui| {
                     let input_label = "Server Name/IP:";
                     ui.label(None, input_label);
                     ui.input_text(hash!(input_label), "", &mut server_name);
 
-                    if ui.button(None, "Create Server") {
+                    if ui.button(None, "Create New Server") {
                         if !server_name.trim().is_empty() {
                             // Proceed with server creation only if the server name is not empty
                             let server_id = Uuid::new_v4(); // Generate a unique server ID
@@ -288,6 +293,7 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                             current_state = AppState::Lobby;
                         }
                     }
+                    
                 });
                 render_back_button(&mut *root_ui(), &mut current_state, AppState::MainMenu);
             }
