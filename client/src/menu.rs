@@ -333,7 +333,7 @@ pub async fn show_menu() -> Option<GameSessionInfo>{
                         // Checkbox for fullscreen control
                         ui.checkbox(
                             hash!(),
-                            "Fullscreen",
+                            "Fullscreen(WIP)",
                             &mut is_fullscreen, // variable to hold fullscreen state
                         );
                     },

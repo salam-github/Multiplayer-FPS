@@ -326,6 +326,8 @@ async fn main() {
     }
 }
 
+
+
 async fn start_game(game_session_info: GameSessionInfo) {
     let runtime = Runtime::new().expect("Failed to create runtime");
 
@@ -333,15 +335,16 @@ async fn start_game(game_session_info: GameSessionInfo) {
         let socket = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind socket");
         socket.connect(&game_session_info.server_address).await.expect("Failed to connect to server");
         println!("Connected to server at {}", game_session_info.server_address);
+        print!("waiting for all players to connect...");
         socket
     });
-
-    let shared_socket = Arc::new(Mutex::new(socket));
     let player_name = game_session_info.player_name.clone();
     let playernamecopy = game_session_info.player_name.clone();
     
-    // Corrected channel creation without specifying capacity
-    let (tx, rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
+    // Wrap the socket in Arc<Mutex<>> for sharing across threads
+    let shared_socket = Arc::new(Mutex::new(socket));
+    // let (tx, rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
+    let (tx, rx): (Sender<GameState>, Receiver<GameState>) = mpsc::channel();
     let (tx_id, rx_id): (Sender<String>, Receiver<String>) = mpsc::channel();
     let (tx_update, rx_update): (Sender<PlayerUpdate>, Receiver<PlayerUpdate>) = mpsc::channel();
 
@@ -349,7 +352,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
 
     thread::spawn(move || {
         runtime.block_on(async {
-            let socket_lock = socket_clone.lock().expect("Failed to lock the socket for usage");
+            let socket = socket_clone.lock().unwrap();
 
             //format a string "new_connection:{player_name}"
             let initial_msg = format!("new_connection:{}", player_name.clone().trim());
@@ -391,7 +394,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
                 match socket.try_recv(&mut buf) {
                     Ok(len) => {
                         let update: GameState = serde_json::from_slice(&buf[..len]).unwrap();
-                        tx.send(vec![update]).unwrap();
+                        tx.send(update).unwrap();  // If tx expects GameState
                         if !game_begun {
                             println!("Game has begun!");
                             game_begun = true;
@@ -446,21 +449,20 @@ async fn start_game(game_session_info: GameSessionInfo) {
             }
         }
 
-        let mut map = game_state[0].map.clone();
+       let mut map = game_state.map.clone();
         //match player id to the correct player
-        let player = game_state[0]
+        let player = game_state
             .players
             .iter()
             .find(|p| p.id == player_id)
             .unwrap()
             .clone();
-
         let scaling_info = ScalingInfo::new();
         let floor_level =
             (WINDOW_HEIGHT as f32 / 2.0) * (1.0 + player.angle_vertical.tan() / (FOV / 2.0).tan());
         let delta = mq::get_frame_time();
         mq::clear_background(NORD_COLOR);
-        draw_map(&map, &scaling_info);
+        draw_map(&game_state.map, &scaling_info);
         player.draw(&scaling_info);
 
         if num_rays < NUM_RAYS as f32 {
@@ -468,7 +470,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
         } else {
             num_rays = NUM_RAYS as f32;
         }
-        let ray_touches = player.cast_rays(&mut map, num_rays as u32);
+        let ray_touches = player.cast_rays(&mut game_state.map, num_rays as u32);
 
         for (i, ray_touch) in ray_touches.iter().enumerate() {
             let ray = &ray_touch.0;
@@ -605,9 +607,9 @@ async fn start_game(game_session_info: GameSessionInfo) {
         );
 
         //if gamestate.new_round_state == true draw big ass text "VI BÖRJÄR NYA ROUND MOTHERFUCKERS" in the middle of the screen
-        if game_state[0].new_round_state {
+        if game_state.new_round_state {
             mq::draw_text(
-                format!("WINNER IS {}", game_state[0].winner).as_str(),
+                format!("WINNER IS {}", game_state.winner).as_str(),
                 scaling_info.offset.x + 300.,
                 scaling_info.offset.y + 250.,
                 50.,
