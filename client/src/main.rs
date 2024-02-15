@@ -1,21 +1,20 @@
 use macroquad::prelude as mq;
 use serde::{Deserialize, Serialize};
-use std::io::{self, Write};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
 mod menu;
-use crate::menu::show_menu;
 mod shared;
-use shared::{AppState, AppStateData, GameSessionInfo, Server};
+use shared::GameSessionInfo;
 
 const WINDOW_WIDTH: u32 = 1024;
 const WINDOW_HEIGHT: u32 = 512;
 
-const MAP_WIDTH: u32 = 24;
-const MAP_HEIGHT: u32 = 24;
+const MAZE_WIDTH: usize = 24;
+const MAZE_HEIGHT: usize = MAZE_WIDTH; // To ensure a square map
+
 const TILE_SIZE: f32 = 64.0 / 3.0;
 
 const NUM_RAYS: u32 = 512;
@@ -29,8 +28,6 @@ const NUM_TEXTURES: i32 = 3;
 
 const BACKGROUND_COLOR: mq::Color = mq::Color::new(73.0 / 255.0, 1.0, 1.0, 1.0);
 const GROUND_COLOR: mq::Color = mq::Color::new(36.0 / 255.0, 219.0 / 255.0, 0.0, 1.0);
-const WALL_COLOR_LIGHT: mq::Color = mq::Color::new(0.6, 0.6, 0.6, 1.0);
-const WALL_COLOR_DARK: mq::Color = mq::Color::new(0.55, 0.55, 0.55, 1.0);
 const NORD_COLOR: mq::Color = mq::Color::new(46.0 / 255.0, 52.0 / 255.0, 64.0 / 255.0, 1.0);
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -39,24 +36,45 @@ struct PlayerUpdate {
     action: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Maze {
+    pub width: usize,
+    pub height: usize,
+    pub layout: Vec<u8>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 struct GameState {
     players: Vec<Player>,
-    map: Vec<u8>,
+    maze: Vec<u8>,
     new_round_state: bool,
     winner: String,
 }
+
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
+struct Position {
+    x: f32,
+    y: f32,
+}
+
+type Direction = Position;
+
+impl Position {
+    fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+}
 #[derive(Clone, Copy, Serialize, Deserialize)]
 struct Ray {
-    pos: (f32, f32),
+    pos: Position,
     angle: f32,
-    direction: (f32, f32),
+    direction: Direction,
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct Player {
     id: u8,
-    pos: (f32, f32),
-    direction: (f32, f32),
+    pos: Position,
+    direction: Direction,
     angle: f32,          // in radians
     angle_vertical: f32, // in radians
     action: String,
@@ -66,42 +84,49 @@ struct Player {
 impl Player {
     fn draw(&self, scaling_info: &ScalingInfo) {
         mq::draw_circle(
-            scaling_info.offset.x + self.pos.0 * scaling_info.width / WINDOW_WIDTH as f32,
-            scaling_info.offset.y + self.pos.1 * scaling_info.height / WINDOW_HEIGHT as f32,
+            scaling_info.offset.x + self.pos.x * scaling_info.width / WINDOW_WIDTH as f32,
+            scaling_info.offset.y + self.pos.y * scaling_info.height / WINDOW_HEIGHT as f32,
             8.0,
             mq::YELLOW,
         );
+
+        // Draw the line representing the player's direction
         mq::draw_line(
-            scaling_info.offset.x + self.pos.0 * scaling_info.width / WINDOW_WIDTH as f32,
-            scaling_info.offset.y + self.pos.1 * scaling_info.height / WINDOW_HEIGHT as f32,
+            scaling_info.offset.x + self.pos.x * scaling_info.width / WINDOW_WIDTH as f32,
+            scaling_info.offset.y + self.pos.y * scaling_info.height / WINDOW_HEIGHT as f32,
             scaling_info.offset.x
-                + self.pos.0 * scaling_info.width / WINDOW_WIDTH as f32
+                + self.pos.x * scaling_info.width / WINDOW_WIDTH as f32
                 + self.angle.cos() * 20.0,
             scaling_info.offset.y
-                + self.pos.1 * scaling_info.height / WINDOW_HEIGHT as f32
+                + self.pos.y * scaling_info.height / WINDOW_HEIGHT as f32
                 + self.angle.sin() * 20.0,
             3.0,
             mq::YELLOW,
         );
     }
-    fn cast_rays(&self, map: &mut [u8], num_rays: u32) -> Vec<(Ray, Option<RayHit>)> {
+
+
+    fn cast_rays(&self, maze: &mut [u8], num_rays: u32) -> Vec<(Ray, Option<RayHit>)> {
         let rotation_matrix = mq::Mat2::from_angle(self.angle);
 
         (0..num_rays)
             .map(|i| {
-                let unrotated_direction =
+                let un_rotated_direction =
                     mq::Vec2::new(1.0, (i as f32 / num_rays as f32 - 0.5) * FOV);
-                let direction = rotation_matrix * unrotated_direction;
+                let direction = rotation_matrix * un_rotated_direction;
 
-                let ray = Ray::new((self.pos.0, self.pos.1), (direction.x, direction.y));
-                ray.cast_ray(map)
+                let ray = Ray::new(
+                    Position::new(self.pos.x, self.pos.y),
+                    Direction::new(direction.x, direction.y),
+                );
+                ray.cast_ray(maze)
             })
             .collect()
     }
 }
 #[derive(Clone, Copy, Serialize, Deserialize)]
 struct RayHit {
-    pos: (f32, f32),
+    pos: Position,
     world_distance: f32,
     x_move: bool,
     wall_coord: f32, // 0-1.0 as x
@@ -123,11 +148,11 @@ impl Lerp for mq::Color {
     }
 }
 
-fn draw_map(map: &[u8], scaling_info: &ScalingInfo) {
-    let scaled_size = scaling_info.width / (MAP_WIDTH as f32 * 2.0);
-    for y in 0..MAP_HEIGHT {
-        for x in 0..MAP_WIDTH {
-            let wall = map[(y * MAP_WIDTH + x) as usize];
+fn draw_map(maze: &[u8], scaling_info: &ScalingInfo) {
+    let scaled_size = scaling_info.width / (MAZE_WIDTH as f32 * 2.0);
+    for y in 0..MAZE_HEIGHT {
+        for x in 0..MAZE_WIDTH {
+            let wall = maze[y * MAZE_WIDTH + x];
             let color = match wall {
                 1 => mq::BLACK,
                 2 => mq::RED,
@@ -194,7 +219,7 @@ fn vertical_textured_line_with_fog(
 
 fn window_conf() -> mq::Conf {
     mq::Conf {
-        window_title: "3D Raycaster".to_owned(),
+        window_title: "Wolf-Wars".to_owned(),
         window_width: WINDOW_WIDTH as i32,
         window_height: WINDOW_HEIGHT as i32,
         window_resizable: true,
@@ -224,20 +249,20 @@ impl ScalingInfo {
     }
 }
 impl Ray {
-    fn new(pos: (f32, f32), direction: (f32, f32)) -> Self {
+    fn new(pos: Position, direction: Direction) -> Self {
         Self {
             pos,
-            angle: direction.1.atan2(direction.0),
+            angle: direction.y.atan2(direction.x),
             direction,
         }
     }
-    fn cast_ray(&self, map: &mut [u8]) -> (Ray, Option<RayHit>) {
+    fn cast_ray(&self, maze: &mut [u8]) -> (Ray, Option<RayHit>) {
         // DDA algorithm
-        let x = self.pos.0 / TILE_SIZE; // (0.0, 8.0)
-        let y = self.pos.1 / TILE_SIZE; // (0.0, 8.0)
+        let x = self.pos.x / TILE_SIZE; // (0.0, 8.0)
+        let y = self.pos.y / TILE_SIZE; // (0.0, 8.0)
         let ray_start = mq::Vec2::new(x, y);
 
-        let ray_dir = mq::Vec2::new(self.direction.0, self.direction.1).normalize();
+        let ray_dir = mq::Vec2::new(self.direction.x, self.direction.y).normalize();
 
         let ray_unit_step_size = mq::Vec2::new(
             (1.0 + (ray_dir.y / ray_dir.x).powi(2)).sqrt(),
@@ -280,15 +305,15 @@ impl Ray {
             }
 
             if map_check.x >= 0.0
-                && map_check.x < MAP_WIDTH as f32
+                && map_check.x < MAZE_WIDTH as f32
                 && map_check.y >= 0.0
-                && map_check.y < MAP_HEIGHT as f32
+                && map_check.y < MAZE_HEIGHT as f32
             {
-                let map_index = (map_check.y * MAP_WIDTH as f32 + map_check.x) as usize;
-                let wall_type = map[map_index];
+                let map_index = (map_check.y * MAZE_WIDTH as f32 + map_check.x) as usize;
+                let wall_type = maze[map_index];
                 if wall_type != 0 {
                     let pos =
-                        mq::Vec2::new(self.pos.0, self.pos.1) + (ray_dir * distance * TILE_SIZE);
+                        mq::Vec2::new(self.pos.x, self.pos.y) + (ray_dir * distance * TILE_SIZE);
 
                     let map_pos = pos / TILE_SIZE;
                     let wall_pos = map_pos - map_pos.floor();
@@ -297,7 +322,7 @@ impl Ray {
                     return (
                         *self,
                         Some(RayHit {
-                            pos: (pos.x, pos.y),
+                            pos: Position::new(pos.x, pos.y),
                             world_distance: distance * TILE_SIZE,
                             x_move,
                             wall_coord,
@@ -317,10 +342,9 @@ async fn main() {
     // Show the menu and wait for it to return session info
     if let Some(session_info) = menu::show_menu().await {
         // Use the session info to start the game
-        println!("Starting game with session info: {:?}", session_info);
         start_game(session_info).await;
     } else {
-        println!("Session info not provided, cannot start the game.");
+        eprintln!("Session info not provided, cannot start the game.");
     }
 }
 
@@ -335,15 +359,10 @@ async fn start_game(game_session_info: GameSessionInfo) {
             .connect(&game_session_info.server_address)
             .await
             .expect("Failed to connect to server");
-        println!(
-            "Connected to server at {}",
-            game_session_info.server_address
-        );
-        print!("waiting for all players to connect...");
         socket
     });
     let player_name = game_session_info.player_name.clone();
-    let playernamecopy = game_session_info.player_name.clone();
+    let player_name_copy = game_session_info.player_name.clone();
 
     // Wrap the socket in Arc<Mutex<>> for sharing across threads
     let shared_socket = Arc::new(Mutex::new(socket));
@@ -370,17 +389,15 @@ async fn start_game(game_session_info: GameSessionInfo) {
             let len = socket.recv(&mut buf).await.unwrap();
             let player_id = String::from_utf8_lossy(&buf[..len]).to_string();
             tx_id.send(player_id.clone()).unwrap();
-            let mut game_begun = false;
-
 
             // COMMUNICATION LOOP
             loop {
-                let mut gameloopupdate = true;
+                let mut game_loop_update = true;
                 // Check for updates from the main game loop to send to the server
                 let player_update = match rx_update.try_recv() {
                     Ok(update) => update,
                     Err(_) => {
-                        gameloopupdate = false;
+                        game_loop_update = false;
                         PlayerUpdate {
                             id: player_id.clone().parse().unwrap(),
                             action: "ping".to_string(),
@@ -388,34 +405,23 @@ async fn start_game(game_session_info: GameSessionInfo) {
                     }
                 };
 
-                if gameloopupdate {
+                if game_loop_update {
                     let update_msg = serde_json::to_string(&player_update).unwrap();
-                    // println!("Sending update to server {}", update_msg);
                     socket.send(update_msg.as_bytes()).await.unwrap();
                 }
 
+                const BUFFER_SIZE: usize = 10240;
                 // check if there is an update from the server
-                let mut buf = [0u8; 10024];
-                match socket.try_recv(&mut buf) {
-                    Ok(len) => {
-                        let update: GameState = serde_json::from_slice(&buf[..len]).unwrap();
-                        tx.send(update).unwrap(); // If tx expects GameState
-                        if !game_begun {
-                            println!("Game has begun!");
-                            game_begun = true;
-                        }
-                    }
-                    Err(_) => {
-                        //  println!("Error receiving data: {:?}", e); // Log errors
-                        //we come here if there is no update from the server
-                    }
+                let mut buf = [0; BUFFER_SIZE];
+                if let Ok(len) = socket.try_recv(&mut buf) {
+                    let update: GameState = serde_json::from_slice(&buf[..len]).unwrap();
+                    tx.send(update).unwrap(); // If tx expects GameState
                 }
             }
         });
     });
 
     let player_id = rx_id.recv().unwrap();
-    // println!("Assigned ID: {}", player_id);
     let player_id: u8 = player_id.parse().unwrap();
     let wall_image = mq::Image::from_file_with_format(
         include_bytes!("../resources/WolfensteinTextures.png"),
@@ -434,27 +440,21 @@ async fn start_game(game_session_info: GameSessionInfo) {
 
     let mut game_state = rx.recv().unwrap();
 
-    // GAME LOOP
     loop {
         // Listen for key presses and send the action to the communication thread
         listen_for_key_presses(tx_update.clone(), player_id);
         // Try to receive a game state update from the communication thread
         match rx.try_recv() {
             Ok(gs) => {
-                //  println!("Received game state from server");
                 game_state = gs;
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                // No new game state available; continue with the current state
-            }
+            Err(mpsc::TryRecvError::Empty) => {}
             Err(e) => {
-                // Handle other errors, such as a disconnection from the sending end
-                println!("Error receiving game state: {:?}", e);
-                break; // Or handle the error as appropriate for your game
+                eprintln!("Error receiving game state: {:?}", e);
+                break;
             }
         }
 
-        let mut map = game_state.map.clone();
         //match player id to the correct player
         let player = game_state
             .players
@@ -467,7 +467,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
             (WINDOW_HEIGHT as f32 / 2.0) * (1.0 + player.angle_vertical.tan() / (FOV / 2.0).tan());
         let delta = mq::get_frame_time();
         mq::clear_background(NORD_COLOR);
-        draw_map(&game_state.map, &scaling_info);
+        draw_map(&game_state.maze, &scaling_info);
         player.draw(&scaling_info);
 
         if num_rays < NUM_RAYS as f32 {
@@ -475,12 +475,9 @@ async fn start_game(game_session_info: GameSessionInfo) {
         } else {
             num_rays = NUM_RAYS as f32;
         }
-        let ray_touches = player.cast_rays(&mut game_state.map, num_rays as u32);
+        let ray_touches = player.cast_rays(&mut game_state.maze, num_rays as u32);
 
-        for (i, ray_touch) in ray_touches.iter().enumerate() {
-            let ray = &ray_touch.0;
-            let ray_hit = &ray_touch.1;
-
+        for (i, (ray, ray_hit)) in ray_touches.iter().enumerate() {
             let x = i as i32;
 
             if let Some(ray_hit) = ray_hit {
@@ -518,23 +515,6 @@ async fn start_game(game_session_info: GameSessionInfo) {
 
                 let floor = VerticalLine::new(x, y1, WINDOW_HEIGHT as i32);
                 vertical_line(floor, &mut output_image, GROUND_COLOR);
-
-                let color = if ray_hit.x_move {
-                    WALL_COLOR_LIGHT
-                } else {
-                    WALL_COLOR_DARK
-                };
-                mq::draw_line(
-                    scaling_info.offset.x + player.pos.0 * scaling_info.width / WINDOW_WIDTH as f32,
-                    scaling_info.offset.y
-                        + player.pos.1 * scaling_info.height / WINDOW_HEIGHT as f32,
-                    scaling_info.offset.x
-                        + ray_hit.pos.0 * scaling_info.width / WINDOW_WIDTH as f32,
-                    scaling_info.offset.y
-                        + ray_hit.pos.1 * scaling_info.height / WINDOW_HEIGHT as f32,
-                    3.0,
-                    color,
-                );
             } else {
                 let floor_y = floor_level.round() as i32;
 
@@ -547,6 +527,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
         }
 
         output_texture.update(&output_image);
+
         mq::draw_texture_ex(
             output_texture,
             scaling_info.offset.x + scaling_info.width / 2.0,
@@ -561,7 +542,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
             },
         );
 
-        // crosshair
+        // cross-hair
         mq::draw_line(
             scaling_info.offset.x + scaling_info.width * (3.0 / 4.0) - 10.0,
             scaling_info.offset.y + scaling_info.height / 2.0,
@@ -585,7 +566,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
             scaling_info.offset.y + 1.0,
             140.0,
             50.0,
-            mq::Color::new(1.0, 1.0, 1.0, 1.0),
+            mq::Color::new(1.0, 1.0, 1.0, 0.5),
         );
 
         // text
@@ -597,7 +578,7 @@ async fn start_game(game_session_info: GameSessionInfo) {
             mq::BLUE,
         );
         mq::draw_text(
-            format!("PLAYER: {}", playernamecopy).as_str(),
+            format!("PLAYER: {}", player_name_copy).as_str(),
             scaling_info.offset.x + 5.,
             scaling_info.offset.y + 30.,
             20.,
@@ -611,7 +592,6 @@ async fn start_game(game_session_info: GameSessionInfo) {
             mq::BLUE,
         );
 
-        //if gamestate.new_round_state == true draw big ass text "VI BÖRJÄR NYA ROUND MOTHERFUCKERS" in the middle of the screen
         if game_state.new_round_state {
             mq::draw_text(
                 format!("WINNER IS {}", game_state.winner).as_str(),
