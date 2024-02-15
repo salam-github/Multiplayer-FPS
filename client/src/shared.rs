@@ -6,9 +6,7 @@ pub enum AppState {
     PlayerNameSelect,
     MainMenu,
     ConnectToServer,
-    CreateServer,
     OptionsHelpMenu,
-    Lobby,
     Game,
 }
 

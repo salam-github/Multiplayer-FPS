@@ -129,7 +129,6 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
 
     let mut current_state = AppState::StartScreen;
     let mut player_name = String::new();
-    let mut server_name = String::new();
     let mut is_fullscreen = false;
     let mut input_ip = String::new();
 
@@ -184,6 +183,7 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                 {
                     current_state = AppState::ConnectToServer;
                 }
+                /*
                 if widgets::Button::new("Create Server")
                     .size(vec2(600.0, 50.0))
                     .position(vec2(button_x, screen_center.y - 10.0))
@@ -191,6 +191,7 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                 {
                     current_state = AppState::CreateServer;
                 }
+                 */
                 if widgets::Button::new("Options/Help")
                     .size(vec2(600.0, 50.0))
                     .position(vec2(button_x, screen_height() - 60.0))
@@ -232,7 +233,9 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                                 name: input_ip.clone(),
                                 player_count: PLAYER_COUNT,
                             });
-                            current_state = AppState::Lobby;
+                            // Transition to the game state or perform other setup as necessary
+                            current_state = AppState::Game;
+                            app_state.gather_session_info();
                         }
                     }
                 });
@@ -256,7 +259,7 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
 
                 render_back_button(&mut root_ui(), &mut current_state, AppState::MainMenu);
             }
-
+/*
             AppState::CreateServer => {
                 let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
                 let container_size = vec2(500.0, 300.0);
@@ -287,7 +290,6 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                 });
                 render_back_button(&mut root_ui(), &mut current_state, AppState::MainMenu);
             }
-
             AppState::Lobby => {
                 if let Some(ref server) = app_state.selected_server {
                     let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
@@ -332,6 +334,7 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                 }
                 render_back_button(&mut root_ui(), &mut current_state, AppState::MainMenu);
             }
+*/
 
             AppState::OptionsHelpMenu => {
                 let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
