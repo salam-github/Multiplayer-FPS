@@ -6,7 +6,8 @@ pub enum AppState {
     PlayerNameSelect,
     MainMenu,
     ConnectToServer,
-    OptionsHelpMenu,
+    Controls,
+    CreateServer,
     Game,
 }
 
@@ -30,5 +31,4 @@ pub struct GameSessionInfo {
 pub struct Server {
     pub name: String,
     pub id: String,
-    pub player_count: i32,
 }

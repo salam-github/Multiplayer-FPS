@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
 mod menu;
@@ -104,7 +105,6 @@ impl Player {
             mq::YELLOW,
         );
     }
-
 
     fn cast_rays(&self, maze: &mut [u8], num_rays: u32) -> Vec<(Ray, Option<RayHit>)> {
         let rotation_matrix = mq::Mat2::from_angle(self.angle);
@@ -440,6 +440,10 @@ async fn start_game(game_session_info: GameSessionInfo) {
 
     let mut game_state = rx.recv().unwrap();
 
+    let target_fps = 69;
+    let target_frame_duration = Duration::from_micros(1_000_000 / target_fps as u64);
+    let mut last_frame_time = Instant::now();
+
     loop {
         // Listen for key presses and send the action to the communication thread
         listen_for_key_presses(tx_update.clone(), player_id);
@@ -608,7 +612,17 @@ async fn start_game(game_session_info: GameSessionInfo) {
                 mq::BLUE,
             );
         }
-        mq::next_frame().await
+
+        // Calculate elapsed time since the last frame
+        let elapsed_time = last_frame_time.elapsed();
+
+        // If the frame was processed faster than the target frame duration, sleep to maintain the frame rate
+        if elapsed_time < target_frame_duration {
+            let sleep_time = target_frame_duration - elapsed_time;
+            thread::sleep(sleep_time);
+        }
+        last_frame_time = Instant::now();
+        mq::next_frame().await;
     }
 }
 

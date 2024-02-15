@@ -2,6 +2,8 @@ use crate::shared::{AppState, AppStateData, GameSessionInfo, Server};
 use macroquad::prelude::*;
 use macroquad::ui::{hash, root_ui, widgets, Skin};
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 use uuid::Uuid;
 
 fn render_back_button(
@@ -12,7 +14,7 @@ fn render_back_button(
     let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
     if widgets::Button::new("Back")
         .size(vec2(200.0, 50.0))
-        .position(vec2(screen_center.x - 100.0, screen_height() - 80.0))
+        .position(vec2(screen_center.x - 100.0, screen_height() - 150.0))
         .ui(ui)
     {
         println!("Back button clicked, transitioning to MainMenu");
@@ -20,18 +22,13 @@ fn render_back_button(
     }
 }
 
-const PLAYER_COUNT: i32 = 10;
-
 pub async fn show_menu() -> Option<GameSessionInfo> {
-    let session_info: Option<GameSessionInfo>;
-
     let mut app_state = AppStateData {
         current_state: AppState::StartScreen,
         servers: Vec::new(),
         selected_server: None,
         player_name: String::new(),
         input_ip: String::new(),
-        // is_fullscreen: false,
     };
     let skin = {
         let label_style = root_ui()
@@ -129,9 +126,8 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
 
     let mut current_state = AppState::StartScreen;
     let mut player_name = String::new();
-    let mut is_fullscreen = false;
     let mut input_ip = String::new();
-
+    let mut port = String::new();
     loop {
         clear_background(BLACK);
         root_ui().push_skin(&skin);
@@ -183,30 +179,50 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                 {
                     current_state = AppState::ConnectToServer;
                 }
-                /*
+
                 if widgets::Button::new("Create Server")
                     .size(vec2(600.0, 50.0))
-                    .position(vec2(button_x, screen_center.y - 10.0))
+                    .position(vec2(button_x, screen_center.y))
                     .ui(&mut root_ui())
                 {
                     current_state = AppState::CreateServer;
                 }
-                 */
-                if widgets::Button::new("Options/Help")
+                if widgets::Button::new("Controls")
                     .size(vec2(600.0, 50.0))
-                    .position(vec2(button_x, screen_height() - 60.0))
+                    .position(vec2(button_x, screen_height() - 200.0))
                     .ui(&mut root_ui())
                 {
-                    current_state = AppState::OptionsHelpMenu;
-                } //remove debug info button before release
-                if widgets::Button::new("Debug Info")
-                    .size(vec2(600.0, 50.0))
-                    .position(vec2(button_x, screen_height() - 120.0))
-                    .ui(&mut root_ui())
-                {
-                    let session_info = app_state.gather_session_info();
-                    println!("Debug Info: \n{}", session_info.to_debug_string());
+                    current_state = AppState::Controls;
                 }
+            }
+
+            AppState::CreateServer => {
+                let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
+                let container_size = vec2(400.0, 200.0);
+                let container_pos = vec2(
+                    screen_center.x - container_size.x * 0.5,
+                    screen_center.y - container_size.y * 0.5,
+                );
+
+                root_ui().window(hash!(), container_pos, container_size, |ui| {
+                    let input_label = "Select Port";
+                    ui.label(None, input_label);
+                    ui.input_text(hash!(input_label), "", &mut port);
+                    let addr = format!("0.0.0.0:{port}");
+
+                    if ui.button(None, "Confirm") && !port.is_empty() {
+                        start_server(addr.clone());
+                        // Update the input_id in AppStateData
+                        app_state.selected_server = Some(Server {
+                            id: Uuid::new_v4().to_string(),
+                            name: addr,
+                        });
+                        // Transition to the game state or perform other setup as necessary
+                        current_state = AppState::Game;
+                        app_state.gather_session_info();
+                    }
+                });
+                render_back_button(&mut root_ui(), &mut current_state, AppState::MainMenu);
             }
 
             AppState::ConnectToServer => {
@@ -231,7 +247,6 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                             app_state.selected_server = Some(Server {
                                 id: Uuid::new_v4().to_string(),
                                 name: input_ip.clone(),
-                                player_count: PLAYER_COUNT,
                             });
                             // Transition to the game state or perform other setup as necessary
                             current_state = AppState::Game;
@@ -239,138 +254,35 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                         }
                     }
                 });
-
-                // Optionally display recent connections if needed
-                // Example: Displaying below the input field, adjust positions as necessary
-                // for (index, server) in app_state.servers.iter().enumerate() {
-                //     if widgets::Button::new(&*server.name)
-                //         .size(vec2(300.0, 30.0))
-                //         .position(vec2(
-                //             screen_center.x - 150.0,
-                //             100.0 + index as f32 * 35.0, // Start below the input field
-                //         ))
-                //         .ui(&mut root_ui())
-                //     {
-                //         println!("Selected recent connection: {}", server.name);
-                //         app_state.selected_server = Some(server.clone());
-                //         // You could directly attempt to connect here or just set the selected_server
-                //     }
-                // }
-
                 render_back_button(&mut root_ui(), &mut current_state, AppState::MainMenu);
             }
-/*
-            AppState::CreateServer => {
-                let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
-                let container_size = vec2(500.0, 300.0);
-                let container_pos = vec2(
-                    screen_center.x - container_size.x * 0.5,
-                    screen_center.y - container_size.y * 0.5,
-                );
 
-                root_ui().window(hash!(), container_pos, container_size, |ui| {
-                    let input_label = "Server Name/IP:";
-                    ui.label(None, input_label);
-                    ui.input_text(hash!(input_label), "", &mut server_name);
-
-                    if ui.button(None, "Create New Server") && !server_name.trim().is_empty() {
-                        // Proceed with server creation only if the server name is not empty
-                        let server_id = Uuid::new_v4(); // Generate a unique server ID
-                        let new_server = Server {
-                            id: server_id.to_string(),
-                            name: server_name.trim().to_string(),
-                            player_count: PLAYER_COUNT,
-                            // address: "".to_string(),
-                        };
-                        println!("Server Created: {} ID: {}", server_name, server_id);
-                        app_state.servers.push(new_server.clone());
-                        app_state.selected_server = Some(new_server);
-                        current_state = AppState::Lobby;
-                    }
-                });
-                render_back_button(&mut root_ui(), &mut current_state, AppState::MainMenu);
-            }
-            AppState::Lobby => {
-                if let Some(ref server) = app_state.selected_server {
-                    let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
-
-                    root_ui().window(
-                        hash!(),
-                        vec2(screen_center.x - 250.0, screen_center.y - 150.0),
-                        vec2(500.0, 300.0),
-                        |ui| {
-                            ui.label(None, &format!("Server: {}", server.name));
-                            // Use hardcoded player count for now
-                            ui.label(None, &format!("Players: {}", PLAYER_COUNT));
-
-                            if ui.button(None, "Join Game") {
-                                println!(
-                                    "{} Joining game on server: {} with {} players",
-                                    app_state.player_name, server.name, PLAYER_COUNT
-                                );
-
-                                // Assuming you have a function to serialize and send or start the backend process
-                                let session_info = GameSessionInfo {
-                                    player_name: app_state.player_name.clone(),
-                                    created_servers: app_state.servers.clone(),
-                                    joined_server: Some(server.clone()),
-                                    server_address: server.name.clone(),
-                                };
-
-                                // run_backend_process(&session_info);
-                                let serialized_data = serde_json::to_string(&session_info)
-                                    .expect("Failed to serialize");
-                                println!("Serialized session info: {}", serialized_data);
-
-                                // Transition to the game state or perform other setup as necessary
-                                current_state = AppState::Game;
-                                app_state.gather_session_info();
-                            }
-                        },
-                    );
-                } else {
-                    println!("Error: No server selected");
-                    app_state.current_state = AppState::ConnectToServer;
-                }
-                render_back_button(&mut root_ui(), &mut current_state, AppState::MainMenu);
-            }
-*/
-
-            AppState::OptionsHelpMenu => {
+            AppState::Controls => {
                 let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
                 root_ui().window(
                     hash!(),
                     vec2(screen_center.x - 300.0, screen_center.y - 200.0),
-                    vec2(600.0, 400.0),
+                    vec2(600.0, 200.0),
                     |ui| {
                         // Placeholder text for game control instructions
                         ui.label(None, "Game Controls:");
                         ui.label(None, "- Use WASD keys to move.");
                         ui.label(None, "- Press 'Space' to shoot.");
                         ui.label(None, "- use ARROW keys to look around.");
-
-                        // Checkbox for fullscreen control
-                        ui.checkbox(
-                            hash!(),
-                            "Fullscreen(WIP)",
-                            &mut is_fullscreen, // variable to hold fullscreen state
-                        );
+                        ui.label(None, "- first to 5 points wins the round.");
                     },
                 );
                 render_back_button(&mut root_ui(), &mut current_state, AppState::MainMenu);
             } // Add additional states if necessary
             AppState::Game => {
-                println!("Transitioning to game...");
-                // Prepare the session_info based on user choices in the menu
-                session_info = Some(app_state.gather_session_info());
-                break; // Break out of the loop to return session_info
+                thread::sleep(Duration::from_secs(5));
+                return Some(app_state.gather_session_info());
             }
         }
         root_ui().pop_skin();
 
         next_frame().await;
     }
-    session_info
 }
 
 impl AppStateData {
@@ -388,44 +300,11 @@ impl AppStateData {
         }
     }
 }
-impl GameSessionInfo {
-    // Method to format the information into a string
-    fn to_debug_string(&self) -> String {
-        let servers = self
-            .created_servers
-            .iter()
-            .map(|s| format!("{} (ID: {}, Players: {})", s.name, s.id, s.player_count))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let selected_server = self
-            .joined_server
-            .as_ref()
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| "None".into());
 
-        format!(
-            "Player Name: {}\nCreated Servers: {}\nSelected Server: {}",
-            self.player_name, servers, selected_server
-        )
-    }
-}
-// Ensure this is within a function
-#[allow(dead_code)]
-fn start_server() {
-    // Serialize session_info within the function scope
-    let server_directory = "../server";
-
-    let status = Command::new("cargo")
-        .arg("run")
-        .arg("--release")
-        .arg("--manifest-path")
-        .arg(format!("{}/Cargo.toml", server_directory))
+fn start_server(addr: String) {
+    let script_path = "./../start_game.sh";
+    Command::new(script_path)
+        .arg(addr)
         .status()
-        .expect("Failed to run cargo command");
-
-    if status.success() {
-        println!("Cargo run successful");
-    } else {
-        eprintln!("Cargo run failed");
-    }
+        .expect("Failed to run the script");
 }
