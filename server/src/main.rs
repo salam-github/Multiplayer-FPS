@@ -38,7 +38,7 @@ impl GameState {
     fn new() -> Self {
         Self {
             players: Vec::new(),
-            maze: select_maze(1, 1),
+            maze: select_maze(1),
             round: 1,
             new_round_state: false,
             winner: String::from(""),
@@ -48,8 +48,14 @@ impl GameState {
 
 #[tokio::main]
 async fn main() {
-    let addr = "0.0.0.0:8080";
-    let socket = UdpSocket::bind(addr).await.unwrap();
+    let args = std::env::args().collect::<Vec<String>>();
+
+    let addr = if args.len() == 2 {
+        format!("0.0.0.0:{}", args[1])
+    } else {
+        "0.0.0.0:8080".to_string()
+    };
+    let socket = UdpSocket::bind(addr.clone()).await.unwrap();
     println!("Server running on {}", addr);
 
     let mut clients: HashMap<SocketAddr, Player> = HashMap::new();
@@ -172,7 +178,7 @@ async fn main() {
             if game_state.round >= 4 {
                 game_state.round = 1;
             }
-            game_state.maze = select_maze(game_state.round, game_state.players.len());
+            game_state.maze = select_maze(game_state.round);
             for player in game_state.players.iter_mut() {
                 player.score = 0;
                 game_state.new_round_state = true;
@@ -239,5 +245,3 @@ impl GameState {
         }
     }
 }
-
-

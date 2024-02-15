@@ -2,8 +2,6 @@ use crate::shared::{AppState, AppStateData, GameSessionInfo, Server};
 use macroquad::prelude::*;
 use macroquad::ui::{hash, root_ui, widgets, Skin};
 use std::process::Command;
-use std::thread;
-use std::time::Duration;
 use uuid::Uuid;
 
 fn render_back_button(
@@ -211,13 +209,11 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                     let addr = format!("0.0.0.0:{port}");
 
                     if ui.button(None, "Confirm") && !port.is_empty() {
-                        start_server(addr.clone());
-                        // Update the input_id in AppStateData
+                        start_server(port.clone());
                         app_state.selected_server = Some(Server {
                             id: Uuid::new_v4().to_string(),
                             name: addr,
                         });
-                        // Transition to the game state or perform other setup as necessary
                         current_state = AppState::Game;
                         app_state.gather_session_info();
                     }
@@ -242,13 +238,11 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                     if ui.button(None, "Confirm") {
                         let trimmed_ip = input_ip.trim();
                         if !trimmed_ip.is_empty() {
-                            // Update the input_id in AppStateData
                             println!("Attempting to connect to server: {}", trimmed_ip);
                             app_state.selected_server = Some(Server {
                                 id: Uuid::new_v4().to_string(),
                                 name: input_ip.clone(),
                             });
-                            // Transition to the game state or perform other setup as necessary
                             current_state = AppState::Game;
                             app_state.gather_session_info();
                         }
@@ -264,7 +258,6 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                     vec2(screen_center.x - 300.0, screen_center.y - 200.0),
                     vec2(600.0, 200.0),
                     |ui| {
-                        // Placeholder text for game control instructions
                         ui.label(None, "Game Controls:");
                         ui.label(None, "- Use WASD keys to move.");
                         ui.label(None, "- Press 'Space' to shoot.");
@@ -273,14 +266,13 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                     },
                 );
                 render_back_button(&mut root_ui(), &mut current_state, AppState::MainMenu);
-            } // Add additional states if necessary
+            }
             AppState::Game => {
-                thread::sleep(Duration::from_secs(5));
+                show_loading_screen().await;
                 return Some(app_state.gather_session_info());
             }
         }
         root_ui().pop_skin();
-
         next_frame().await;
     }
 }
@@ -301,9 +293,55 @@ impl AppStateData {
     }
 }
 
+async fn show_loading_screen() {
+    let screen_center = vec2(screen_width() / 2.0, screen_height() / 2.0);
+    let container_size = vec2(160.0, 80.0);
+    let container_pos = vec2(
+        screen_center.x - container_size.x * 0.5,
+        screen_center.y - container_size.y * 0.5,
+    );
+
+    let timer = Instant::now();
+    loop {
+        if timer.elapsed() > Duration::from_secs(2) {
+            break;
+        }
+        clear_background(BLACK);
+
+        root_ui().window(hash!(), container_pos, container_size, |ui| {
+            ui.label(None, "Loading...");
+        });
+
+        next_frame().await;
+    }
+}
+
+use std::env;
+use std::time::{Duration, Instant};
+
 fn start_server(addr: String) {
-    let script_path = "./../start_game.sh";
+    // Get the current working directory
+    let current_dir = env::current_dir().expect("Failed to get current working directory");
+
+    // Navigate up one level to the parent directory
+    let parent_dir = current_dir
+        .parent()
+        .expect("Failed to get parent directory");
+
+    // Specify the path to the server directory
+    let server_directory = parent_dir.join("server");
+
+    // Convert the path to a string
+    let server_directory_str = server_directory
+        .to_str()
+        .expect("Failed to convert path to string");
+
+    // Specify the path to the script
+    let script_path = "./../init_server.sh";
+
+    // Run the script with the absolute path as an argument
     Command::new(script_path)
+        .arg(server_directory_str)
         .arg(addr)
         .status()
         .expect("Failed to run the script");

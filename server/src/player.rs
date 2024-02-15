@@ -69,7 +69,7 @@ impl Player {
         }
     }
 
-    pub fn input(&mut self, maze: &mut Vec<u8>, moved: &mut bool) -> Option<u32> {
+    pub fn input(&mut self, maze: &mut [u8], moved: &mut bool) -> Option<u32> {
         if self.action == "left" {
             self.angle -= std::f32::consts::FRAC_PI_2;
             self.action = String::from("");

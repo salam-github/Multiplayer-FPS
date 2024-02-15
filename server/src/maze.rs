@@ -3,8 +3,8 @@ use std::collections::{HashSet, VecDeque};
 use crate::{BREAKABLE, EMPTY, MAZE_HEIGHT, MAZE_WIDTH, WALL};
 use rand::{thread_rng, Rng};
 
-pub fn select_maze(level: usize, players: usize) -> Vec<u8> {
-    let num_removed_bricks = (MAZE_WIDTH / 5) + players - level;
+pub fn select_maze(level: usize) -> Vec<u8> {
+    let num_removed_bricks = (MAZE_WIDTH / 5) - level;
     generate_maze(MAZE_WIDTH, MAZE_HEIGHT, num_removed_bricks)
         .iter()
         .flatten()

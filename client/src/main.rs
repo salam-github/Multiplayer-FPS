@@ -347,7 +347,6 @@ async fn main() {
         eprintln!("Session info not provided, cannot start the game.");
     }
 }
-
 async fn start_game(game_session_info: GameSessionInfo) {
     let runtime = Runtime::new().expect("Failed to create runtime");
 
