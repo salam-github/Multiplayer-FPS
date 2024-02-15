@@ -1,176 +1,48 @@
-use macroquad::prelude as mq;
+mod maze;
+mod player;
+
+use crate::maze::select_maze;
+use crate::player::{Player, Position};
 use rand::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::net::UdpSocket;
-mod game_maps;
-use game_maps::maps::select_map;
 
-const MAP_WIDTH: u32 = 24;
-const MAP_HEIGHT: u32 = 24;
+pub const MAZE_WIDTH: usize = 24;
+pub const MAZE_HEIGHT: usize = MAZE_WIDTH;
+
+pub const EMPTY: u8 = 0;
+pub const PLAYER: u8 = 1;
+pub const WALL: u8 = 2;
+
+pub const BREAKABLE: u8 = 3;
+
 const TILE_SIZE: f32 = 64.0 / 3.0;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct PlayerUpdate {
-    id: u8,
+    id: usize,
     action: String,
 }
 #[derive(Serialize, Deserialize)]
 struct GameState {
     players: Vec<Player>,
-    map: Vec<u8>,
+    maze: Vec<u8>,
+    round: usize,
     new_round_state: bool,
     winner: String,
 }
-#[derive(Clone, Serialize, Deserialize, Debug)]
-struct Player {
-    id: u8,
-    pos: (f32, f32),
-    direction: (f32, f32),
-    angle: f32,          // in radians
-    angle_vertical: f32, // in radians
-    action: String,
-    name: String,
-    score: u32,
-}
-impl Player {
-    fn new(pos: (f32, f32), id: u8, name: String) -> Self {
+
+impl GameState {
+    fn new() -> Self {
         Self {
-            id,
-            pos,
-            direction: (1.0_f32, 0.0_f32),
-            angle: 0.0,
-            angle_vertical: 0.0,
-            action: String::from(""),
-            name,
-            score: 0,
+            players: Vec::new(),
+            maze: select_maze(1, 1),
+            round: 1,
+            new_round_state: false,
+            winner: String::from(""),
         }
-    }
-    fn touching_wall(&mut self, move_vec: mq::Vec2, map: &mut [u8], moved: &mut bool) {
-        let new_x = self.pos.0 + TILE_SIZE * move_vec.x;
-        let new_y = self.pos.1 + TILE_SIZE * move_vec.y;
-
-        let map_x = (new_x / TILE_SIZE) as usize;
-        let map_y = (new_y / TILE_SIZE) as usize;
-        let map_index = map_y * MAP_WIDTH as usize + map_x;
-
-        if map[map_index] == 0 {
-            // Assuming 0 is an empty tile
-            //set the current positions tile to 0
-            let current_map_x = (self.pos.0 / TILE_SIZE) as usize;
-            let current_map_y = (self.pos.1 / TILE_SIZE) as usize;
-            let current_map_index = current_map_y * MAP_WIDTH as usize + current_map_x;
-            map[current_map_index] = 0;
-            self.pos.0 = new_x;
-            self.pos.1 = new_y;
-            //set the new position to 1 (player)
-            map[map_index] = 1;
-            self.action = String::from("");
-            *moved = true;
-        }
-    }
-    fn input(&mut self, map: &mut [u8], moved: &mut bool) -> Option<u32> {
-        // Updated so you turn 90 degrees at a time
-        if self.action == "left" {
-            self.angle -= std::f32::consts::FRAC_PI_2;
-            self.action = String::from("");
-            //Set moved to true
-            *moved = true;
-        }
-        if self.action == "right" {
-            self.angle += std::f32::consts::FRAC_PI_2;
-            self.action = String::from("");
-            //Set moved to true
-            *moved = true;
-        }
-
-        if self.action == "shoot" {
-            // Convert player position to grid coordinates
-            let grid_x = (self.pos.0 / TILE_SIZE).floor() as usize;
-            let grid_y = (self.pos.1 / TILE_SIZE).floor() as usize;
-
-            // Determine direction to step through the map based on angle
-            let step_x = self.angle.cos().round() as isize; // Round to ensure we move strictly in grid directions
-            let step_y = self.angle.sin().round() as isize;
-
-            // Initialize variables for iteration
-            let mut current_x = grid_x as isize;
-            let mut current_y = grid_y as isize;
-            // let mut tile_found = false;
-            //make sure we start from the tile next to the player, not from the player's tile
-            current_x += step_x;
-            current_y += step_y;
-
-            // Iterate through the map until we find a wall of type '3' or reach the edge
-            while current_x >= 0
-                && current_x < MAP_WIDTH as isize
-                && current_y >= 0
-                && current_y < MAP_HEIGHT as isize
-            {
-                let idx = (current_y * MAP_WIDTH as isize + current_x) as usize;
-                //if idx is 2 return none and break
-                if map[idx] == 2 {
-                    break;
-                }
-
-                if map[idx] == 1 || map[idx] == 3 {
-                    // Assuming '3' is the byte value representing the wall type
-                    // tile_found = true;
-                    if map[idx] == 1 {
-                        self.score += 1;
-                    }
-                    //remove the wall
-                    map[idx] = 0;
-
-                    //set moved to true
-                    *moved = true;
-                    //reset action
-                    self.action = String::from("");
-                    return Some(idx as u32);
-                }
-                // Move to the next tile in the direction
-                current_x += step_x;
-                current_y += step_y;
-            }
-
-            self.action = String::from(""); // Clear action after processing
-        }
-
-        self.direction = (self.angle.cos(), self.angle.sin());
-
-        let mut move_vec = mq::Vec2::new(0.0, 0.0);
-        // Updated so you move one tile at a time
-
-        if self.action == "W" {
-            move_vec = mq::Vec2::new(self.direction.0, self.direction.1);
-        }
-        if self.action == "S" {
-            move_vec = mq::Vec2::new(-self.direction.0, -self.direction.1);
-        }
-        if self.action == "D" {
-            move_vec = mq::Vec2::new(-self.direction.1, self.direction.0);
-        }
-        if self.action == "A" {
-            move_vec = mq::Vec2::new(self.direction.1, -self.direction.0);
-        }
-
-        if move_vec.length() > 0.0 {
-            self.touching_wall(move_vec, map, moved);
-        }
-
-        if self.pos.0 < 0.0 {
-            self.pos.0 = 0.0;
-        } else if self.pos.0 > MAP_WIDTH as f32 * TILE_SIZE {
-            self.pos.0 = MAP_WIDTH as f32 * TILE_SIZE;
-        }
-
-        if self.pos.1 < 0.0 {
-            self.pos.1 = 0.0;
-        } else if self.pos.1 > MAP_HEIGHT as f32 * TILE_SIZE {
-            self.pos.1 = MAP_HEIGHT as f32 * TILE_SIZE;
-        }
-        None
     }
 }
 
@@ -181,79 +53,62 @@ async fn main() {
     println!("Server running on {}", addr);
 
     let mut clients: HashMap<SocketAddr, Player> = HashMap::new();
-    let mut player_count: usize = 0;
     let mut buf = [0u8; 1024];
-    let mut players: Vec<Player> = Vec::new();
-
-    let mut map = select_map(1);
-    let mut round: u8 = 1;
-    let mut gamestate = GameState {
-        players: Vec::new(),
-        map: map.to_vec(),
-        new_round_state: false,
-        winner: String::from(""),
-    };
-
+    let mut game_state = GameState::new();
     let placeholder_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0));
 
     loop {
         let (len, client_addr) = match socket.try_recv_from(&mut buf) {
             Ok((len, client_addr)) => (len, client_addr),
-            Err(_) => {
-                //  println!("No message received");
-                //return placeholder shit
-                (0, placeholder_addr)
-            }
+            Err(_) => (0, placeholder_addr),
         };
         let msg = String::from_utf8_lossy(&buf[..len]);
 
         //bool to indicate when to send initial game state, after this we only send when a player is updated
         let mut send_initial_gs = false;
 
-        if msg.contains("new_connection") {
-            //Retrieve name from incoming msg that is "new_connection:{player_name}"
+        if msg.starts_with("new_connection") {
+            // Example: "new_connection:foo" -> "foo"
             let player_name = msg
                 .split_once(':')
                 .map(|(_, name)| name.trim())
                 .unwrap_or("");
-            //this condition below is a more efficient way than doing a .contains_key on a hashmap
+
             if let std::collections::hash_map::Entry::Vacant(e) = clients.entry(client_addr) {
-                player_count += 1;
-                let id = player_count.to_string();
+                send_initial_gs = true;
+                let id = game_state.players.len().to_string();
                 println!(
                     "New player connected with ID: {}, name: {}",
                     id, player_name
                 );
-                if player_count == 2 { //start the game when the second player connects
-                    send_initial_gs = true;
-                }
                 socket.send_to(id.as_bytes(), client_addr).await.unwrap();
-                //randomize the player's position on the map and make sure it's not on a wall
-                let mut rng = rand::thread_rng();
-                let new_pos: (f32, f32);
+                let mut rng = thread_rng();
+                let new_pos: Position;
                 loop {
-                    let new_x_tile = rng.gen_range(0..MAP_WIDTH) as usize;
-                    let new_y_tile = rng.gen_range(0..MAP_HEIGHT) as usize;
-                    let idx = new_y_tile * MAP_WIDTH as usize + new_x_tile;
-                    // Ensure the chosen position is empty
-                    if map[idx] == 0 {
+                    let new_x_tile = rng.gen_range(0..MAZE_WIDTH);
+                    let new_y_tile = rng.gen_range(0..MAZE_HEIGHT);
+                    let idx = new_y_tile * MAZE_WIDTH + new_x_tile;
+
+                    if game_state.maze[idx] == EMPTY {
                         // Calculate the center of the tile for the new position
-                        new_pos = (
-                            new_x_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
-                            new_y_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
-                        );
+                        new_pos = Position {
+                            x: new_x_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                            y: new_y_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                        };
+
                         // Set the tile to 1 (player)
-                        map[idx] = 1;
+                        game_state.maze[idx] = PLAYER;
                         break;
                     }
                 }
-                let new_player = Player::new(new_pos, player_count as u8, player_name.to_string());
+                let new_player =
+                    Player::new(new_pos, game_state.players.len(), player_name.to_string());
                 e.insert(new_player.clone());
-                players.push(new_player.clone());
+                game_state.players.push(new_player.clone());
             }
         } else if let Ok(update) = serde_json::from_str::<PlayerUpdate>(&msg) {
             // Update players action in the vector of players
-            for player in players.iter_mut() {
+            for player in game_state.players.iter_mut() {
                 if player.id == update.id && update.action != "ping" {
                     player.action = update.action.clone();
                 }
@@ -265,10 +120,10 @@ async fn main() {
         // Collect IDs of players that need to be repositioned
         let mut reposition_player_ids = Vec::new();
 
-        for player in players.iter_mut() {
-            if let Some(idx) = &player.input(&mut map, &mut has_a_player_moved) {
-                let x = idx % MAP_WIDTH;
-                let y = idx / MAP_WIDTH;
+        for player in game_state.players.iter_mut() {
+            if let Some(idx) = &player.input(&mut game_state.maze, &mut has_a_player_moved) {
+                let x = idx % MAZE_WIDTH as u32;
+                let y = idx / MAZE_HEIGHT as u32;
 
                 // Instead of another mutable borrow here, just collect the IDs
                 reposition_player_ids.push((player.id, x, y));
@@ -278,118 +133,109 @@ async fn main() {
         // Apply updates based on collected IDs, avoiding double mutable borrow
         for (_player_id, x, y) in reposition_player_ids {
             let mut rng = rand::thread_rng();
-            let new_pos: (f32, f32);
+            let new_pos: Position;
             loop {
-                let new_x_tile = rng.gen_range(0..MAP_WIDTH) as usize;
-                let new_y_tile = rng.gen_range(0..MAP_HEIGHT) as usize;
-                let idx = new_y_tile * MAP_WIDTH as usize + new_x_tile;
-                // Ensure the chosen position is empty
-                if map[idx] == 0 {
+                let new_x_tile = rng.gen_range(0..MAZE_WIDTH);
+                let new_y_tile = rng.gen_range(0..MAZE_HEIGHT);
+                let idx = new_y_tile * MAZE_WIDTH + new_x_tile;
+                if game_state.maze[idx] == EMPTY {
                     // Calculate the center of the tile for the new position
-                    new_pos = (
-                        new_x_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
-                        new_y_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
-                    );
+                    new_pos = Position {
+                        x: new_x_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                        y: new_y_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                    };
                     break;
                 }
             }
 
             // Find and reposition the player including the circle on the map
-            if let Some(player) = players
+            if let Some(player) = game_state
+                .players
                 .iter_mut()
-                .find(|p| (p.pos.0 / TILE_SIZE) as u32 == x && (p.pos.1 / TILE_SIZE) as u32 == y)
+                .find(|p| (p.pos.x / TILE_SIZE) as u32 == x && (p.pos.y / TILE_SIZE) as u32 == y)
             {
                 player.pos = new_pos;
                 // use the player.pos to place a tile 1 on the map
-                let new_x = player.pos.0 / TILE_SIZE;
-                let new_y = player.pos.1 / TILE_SIZE;
+                let new_x = player.pos.x / TILE_SIZE;
+                let new_y = player.pos.y / TILE_SIZE;
                 let map_x = new_x as usize;
                 let map_y = new_y as usize;
-                let map_index = map_y * MAP_WIDTH as usize + map_x;
-                map[map_index] = 1;
+                let map_index = map_y * MAZE_WIDTH + map_x;
+                game_state.maze[map_index] = PLAYER;
                 has_a_player_moved = true;
             }
         }
-        let mut new_round = false;
+        let new_round = game_state.update_level();
         //if one of the players has reached the score limit (5), start a new round
-        for player in players.iter() {
-            if player.score >= 5 {
-                new_round = true;
-                round += 1;
-                gamestate.winner = player.name.clone();
-            }
-        }
-        //if new round select new map and reset player scores and randomly place them on the map
+
         if new_round {
-            if round == 4 {
-                round = 1;
+            if game_state.round >= 4 {
+                game_state.round = 1;
             }
-            let new_map = select_map(round);
-            map = new_map;
-            gamestate.map = map.to_vec();
-            for player in players.iter_mut() {
+            game_state.maze = select_maze(game_state.round, game_state.players.len());
+            for player in game_state.players.iter_mut() {
                 player.score = 0;
-                gamestate.new_round_state = true;
+                game_state.new_round_state = true;
             }
-            randomize_player_position(&mut map, &mut players);
+            game_state.randomize_player_position();
         }
 
-        gamestate.map = map.to_vec();
-        //if a player has moved, update the game state
         if has_a_player_moved || send_initial_gs {
-            // println!(
-            //     "Player has moved or enough players connected, sending game state to all clients"
-            // );
-
-            gamestate.players = players.clone();
             //broadcast the game state to all clients
-            let broadcast_msg = serde_json::to_string(&gamestate).unwrap();
+            let broadcast_msg = serde_json::to_string(&game_state).unwrap();
             for &addr in clients.keys() {
-                //  println!("Sending update to {}", addr);
-                // println!("broadcast_msg: {:?}", broadcast_msg);
                 socket
                     .send_to(broadcast_msg.as_bytes(), addr)
                     .await
                     .unwrap();
-                //if new round wait 5s before sending the game state again
             }
+            const DURATION_BETWEEN_LEVELS: u64 = 5;
             if new_round {
-                std::thread::sleep(std::time::Duration::from_secs(3));
+                tokio::time::sleep(std::time::Duration::from_secs(DURATION_BETWEEN_LEVELS)).await;
             }
-            //reset new_round
-
-            gamestate.new_round_state = false;
-            gamestate.winner = String::from("");
+            game_state.new_round_state = false;
+            game_state.winner = String::from("");
         }
     }
 }
 
-//helper function to randomly place players on the map
-fn randomize_player_position(map: &mut [u8], players: &mut [Player]) {
-    let mut rng = rand::thread_rng();
-    for player in players.iter_mut() {
-        let new_pos: (f32, f32);
-        loop {
-            let new_x_tile = rng.gen_range(0..MAP_WIDTH) as usize;
-            let new_y_tile = rng.gen_range(0..MAP_HEIGHT) as usize;
-            let idx = new_y_tile * MAP_WIDTH as usize + new_x_tile;
-            // Ensure the chosen position is empty
-            if map[idx] == 0 {
-                // Calculate the center of the tile for the new position
-                new_pos = (
-                    new_x_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
-                    new_y_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
-                );
-                break;
+impl GameState {
+    fn update_level(&mut self) -> bool {
+        for player in self.players.iter() {
+            if player.score >= 5 {
+                self.round += 1;
+                self.winner = player.name.clone();
+                return true;
             }
         }
-        player.pos = new_pos;
-        // use the player.pos to place a tile 1 on the map
-        let new_x = player.pos.0 / TILE_SIZE;
-        let new_y = player.pos.1 / TILE_SIZE;
-        let map_x = new_x as usize;
-        let map_y = new_y as usize;
-        let map_index = map_y * MAP_WIDTH as usize + map_x;
-        map[map_index] = 1;
+        false
+    }
+    fn randomize_player_position(&mut self) {
+        let mut rng = thread_rng();
+        for player in self.players.iter_mut() {
+            let new_pos: Position;
+            loop {
+                let new_x_tile = rng.gen_range(0..MAZE_WIDTH);
+                let new_y_tile = rng.gen_range(0..MAZE_HEIGHT);
+                let idx = new_y_tile * MAZE_WIDTH + new_x_tile;
+                // Ensure the chosen position is empty
+                if self.maze[idx] == EMPTY {
+                    // Calculate the center of the tile for the new position
+                    new_pos = Position {
+                        x: new_x_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                        y: new_y_tile as f32 * TILE_SIZE + TILE_SIZE / 2.0,
+                    };
+
+                    break;
+                }
+            }
+            player.pos = new_pos;
+            let new_x = player.pos.x / TILE_SIZE;
+            let new_y = player.pos.y / TILE_SIZE;
+            let map_x = new_x as usize;
+            let map_y = new_y as usize;
+            let map_index = map_y * MAZE_WIDTH + map_x;
+            self.maze[map_index] = PLAYER;
+        }
     }
 }
