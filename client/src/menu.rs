@@ -3,6 +3,8 @@ use macroquad::prelude::*;
 use macroquad::ui::{hash, root_ui, widgets, Skin};
 use std::process::Command;
 use uuid::Uuid;
+use local_ip_address::local_ip;
+
 
 fn render_back_button(
     ui: &mut macroquad::ui::Ui,
@@ -207,6 +209,8 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                     ui.label(None, input_label);
                     ui.input_text(hash!(input_label), "", &mut port);
                     let addr = format!("0.0.0.0:{port}");
+                    let my_ip = local_ip().unwrap();
+                    ui.label(None, &format!("Your IP: {}", my_ip));
 
                     if ui.button(None, "Confirm") && !port.is_empty() {
                         start_server(port.clone());
@@ -262,7 +266,8 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                         ui.label(None, "- Use WASD keys to move.");
                         ui.label(None, "- Press 'Space' to shoot.");
                         ui.label(None, "- use ARROW keys to look around.");
-                        ui.label(None, "- first to 5 points wins the round.");
+                        ui.label(None, "First to 5 points wins the round.");
+                        ui.label(None, "Next round starts in 5 seconds.");
                     },
                 );
                 render_back_button(&mut root_ui(), &mut current_state, AppState::MainMenu);
