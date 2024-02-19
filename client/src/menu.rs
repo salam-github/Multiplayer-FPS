@@ -1,10 +1,9 @@
 use crate::shared::{AppState, AppStateData, GameSessionInfo, Server};
+use local_ip_address::local_ip;
 use macroquad::prelude::*;
 use macroquad::ui::{hash, root_ui, widgets, Skin};
 use std::process::Command;
 use uuid::Uuid;
-use local_ip_address::local_ip;
-
 
 fn render_back_button(
     ui: &mut macroquad::ui::Ui,
@@ -17,7 +16,6 @@ fn render_back_button(
         .position(vec2(screen_center.x - 100.0, screen_height() - 150.0))
         .ui(ui)
     {
-        println!("Back button clicked, transitioning to MainMenu");
         *current_state = target_state;
     }
 }
@@ -161,7 +159,6 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                         if !trimmed_name.is_empty() {
                             // Update the player_name in AppStateData
                             app_state.player_name = trimmed_name.to_string();
-                            println!("Player Name: {}", app_state.player_name);
                             current_state = AppState::MainMenu;
                         }
                     }
@@ -242,7 +239,6 @@ pub async fn show_menu() -> Option<GameSessionInfo> {
                     if ui.button(None, "Confirm") {
                         let trimmed_ip = input_ip.trim();
                         if !trimmed_ip.is_empty() {
-                            println!("Attempting to connect to server: {}", trimmed_ip);
                             app_state.selected_server = Some(Server {
                                 id: Uuid::new_v4().to_string(),
                                 name: input_ip.clone(),

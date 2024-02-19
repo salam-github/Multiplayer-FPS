@@ -160,7 +160,7 @@ pub fn generate_maze(width: usize, height: usize, num_removed_bricks: usize) -> 
     maze
 }
 
-fn is_reachable_from_start(maze: &Vec<Vec<u8>>, start_row: usize, start_col: usize) -> bool {
+fn is_reachable_from_start(maze: &[Vec<u8>], start_row: usize, start_col: usize) -> bool {
     let mut visited: HashSet<(usize, usize)> = HashSet::new();
     let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
 
@@ -217,7 +217,7 @@ fn fix_enclosed_areas(maze: &mut Vec<Vec<u8>>) {
     }
 }
 
-fn add_breakable_walls(maze: &mut Vec<Vec<u8>>, num_removed_bricks: usize) {
+fn add_breakable_walls(maze: &mut [Vec<u8>], num_removed_bricks: usize) {
     let mut rng = thread_rng();
     let mut total_added = num_removed_bricks * 2;
     while total_added > 0 {
