@@ -20,17 +20,16 @@ Ensure Rust is installed on your system. Clone the repo, navigate to the game di
 
 ### Installation
 
-\```bash
+```bash
 git clone https://github.com/salam-github/fps-vilburg
-
 cd Multiplayer-FPS
-\```
+```
 
 ### Running the Game
 
-\```bash
+```bash
 ./start.sh
-\```
+```
 
 ## Controls
 
